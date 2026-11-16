@@ -2,7 +2,8 @@
 (function () {
   const E = globalThis.Endfield, D = E.data;
   const SLOT_KEYS = ['armor', 'gloves', 'kit1', 'kit2'];
-  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch'], ['Tactical', 'Tact.']];
+  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch'], ['Tactical', 'Tact.'], ['PerfectDodge', 'Dodge'], ['TakeDamage', 'Hit']]
+  const ENEMY_ACTIONS = [['EnemyCharge', 'Charge']];
   const COLUMNS = 6; // 4 operators, Team (+ battlefield), Enemy
 
   const newSlot = (op = '', weapon = '', gear = []) => ({
@@ -48,9 +49,10 @@
       initialStagger: state.initialStagger, startStaggeredFor: state.startStaggeredFor };
     const simEntries = [], uiToSim = [], simToUi = [];
     state.actions.forEach((action, uiIndex) => {
-      if (!toSim.has(action.slot)) return;
+      const operatorSlot = action.slot === 5 ? filled[0] : action.slot; // scenario events of the Enemy column run on the first operator's lane
+      if (!toSim.has(operatorSlot)) return;
       uiToSim[uiIndex] = simEntries.length; simToUi[simEntries.length] = uiIndex;
-      simEntries.push({ operator: toSim.get(action.slot), action: action.action, extraDelay: action.extraDelay || 0 });
+      simEntries.push({ operator: toSim.get(operatorSlot), action: action.action, extraDelay: action.extraDelay || 0, hp: action.hp });
     });
     return { stats, filled, enemy, options, simEntries, uiToSim, simToUi };
   }
@@ -98,11 +100,11 @@
           if (!alive && effect.endEntry !== simIndex) continue;
           const list = row.effects[column];
           let item = list.find((candidate) => candidate.name === effect.name);
-          if (!item) { item = { name: effect.name, count: 0, ended: true, detail: effect.detail, icon: effect.icon, level: 0 }; list.push(item); }
+          if (!item) { item = { name: effect.name, count: 0, ended: true, detail: effect.detail, icon: effect.icon, level: 0, alive: 0, endedCount: 0 }; list.push(item); }
           if (effect.level) item.level = Math.max(item.level, effect.level);
           if (!item.icon) item.icon = effect.icon;
-          item.count++;
-          if (alive) item.ended = false;
+          if (alive) { item.alive++; item.ended = false; } else item.endedCount++; // a badge counts live stacks only (stacks replaced at the cap are not shown)
+          item.count = item.alive || item.endedCount;
           if (effect.detail) item.detail = effect.detail;
         }
       }
@@ -112,5 +114,5 @@
     return view;
   }
 
-  E.builder = { SLOT_KEYS, ACTIONS, COLUMNS, newSlot, defaultState, slotStats, prepare, quickRun, simulate };
+  E.builder = { SLOT_KEYS, ACTIONS, ENEMY_ACTIONS, COLUMNS, newSlot, defaultState, slotStats, prepare, quickRun, simulate };
 })();

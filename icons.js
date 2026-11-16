@@ -28,7 +28,7 @@
       if (!stats.has(stat)) continue;
       const tags = tagsOf(modifiers, stat), elements = tags.filter((t) => [...ELEMENTS, 'Physical'].includes(t));
       if (elements.length === 1) return 'Generic_' + elements[0];
-      if (!elements.length && tags.includes('Arts')) return 'Generic_Aether'; // assumption: Aether is the generic Arts icon
+      if (!elements.length && tags.includes('Arts')) return 'Generic_Physical'; // Aether is an unused artefact icon; Arts-only effects fall back to Generic_Physical
     }
     if (stats.has('CriticalRate') || stats.has('CriticalDamage')) return 'Critical';
     if (stats.has('StaggerEfficiency')) return 'Generic_Stagger';

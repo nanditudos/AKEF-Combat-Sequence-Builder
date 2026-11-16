@@ -45,7 +45,7 @@
     } }] };
 
   sets.Frontiers = { modifiers: [], triggers: [{ // Combo Skill cooldown reduction is ignored (no combo cooldowns)
-    on: 'SPRestored', when: ({ event }) => event.source.category !== 'BasicAttack', // restored (not returned) by a skill
+    on: 'SPRestored', when: ({ event }) => !['BasicAttack', 'PerfectDodge'].includes(event.source.category), // restored (not returned) by a skill
     apply: ({ simulation }) => simulation.applyToTeam('FrontiersTeam', [mod('DamageBonus', 0.16)], 15) }] };
 
   sets['AIC Fieldwork'] = { modifiers: [mod('DamageBonus', 0.20), mod('UltimateEfficiency', 0.10)], triggers: [] };

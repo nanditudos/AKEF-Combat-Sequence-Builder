@@ -471,7 +471,7 @@ Endfield.testsDone = (async function () {
   check('roman numerals', E.roman(1) + E.roman(2) + E.roman(4) + E.roman(9) + E.roman(14) === 'IIIIVIXXIV' ? 1 : 0, 1);
   check('icons: element Amp / Arts Amp / mixed Amp', [E.iconForModifiers([E.mod('Amp', 0.1, ['Electric'])]), E.iconForModifiers([E.mod('Amp', 0.1, ['Arts'])]), E.iconForModifiers([E.mod('Amp', 0.1, ['Electric']), E.mod('Amp', 0.1, ['Nature'])])].join() === 'Electric_Amp,Arts_Amp,Generic_Amp' ? 1 : 0, 1);
   check('icons: single-element damage bonus / damage taken, Arts, crit, defence, default', [E.iconForModifiers([E.mod('DamageBonus', 0.1, ['Electric', 'BattleSkill'])]), E.iconForModifiers([E.mod('DamageTaken', 0.1, ['Physical'])]), E.iconForModifiers([E.mod('DamageTaken', 0.1, ['Arts'])]),
-    E.iconForModifiers([E.mod('CriticalRate', 0.1)]), E.iconForModifiers([E.mod('DEFBonus', 0.1)]), E.iconForModifiers([E.mod('ATKBonus', 0.1)]), E.iconForModifiers([E.mod('DamageBonus', 0.1, ['Cryo']), E.mod('DamageBonus', 0.1, ['Nature'])])].join() === 'Generic_Electric,Generic_Physical,Generic_Aether,Critical,Generic_Defense,Generic_Attack,Generic_Attack' ? 1 : 0, 1);
+    E.iconForModifiers([E.mod('CriticalRate', 0.1)]), E.iconForModifiers([E.mod('DEFBonus', 0.1)]), E.iconForModifiers([E.mod('ATKBonus', 0.1)]), E.iconForModifiers([E.mod('DamageBonus', 0.1, ['Cryo']), E.mod('DamageBonus', 0.1, ['Nature'])])].join() === 'Generic_Electric,Generic_Physical,Generic_Physical,Critical,Generic_Defense,Generic_Attack,Generic_Attack' ? 1 : 0, 1);
   check('icons: susceptibility mapping', [E.susceptibilityIcon('Heat'), E.susceptibilityIcon('Physical'), E.susceptibilityIcon('Arts'), E.susceptibilityIcon('Other')].join() === 'Heat_Susceptibility,Physical_Susceptibility,Arts_Susceptibility,Generic_Susceptibility' ? 1 : 0, 1);
   view = B.simulate(B.defaultState());
   check('builder: Force of Nature carries the Electric_Amp icon', (view.rows[0].effects[0].find((e) => e.name === 'ForceOfNature') || {}).icon === 'Electric_Amp' ? 1 : 0, 1);
@@ -484,6 +484,57 @@ Endfield.testsDone = (async function () {
   const swapped = OPT.createProblem(B.defaultState(), {}), g1 = OPT.baseGenome(swapped), g2 = JSON.parse(JSON.stringify(g1));
   [g2[0].kit1, g2[0].kit2] = [g1[0].kit2, g1[0].kit1];
   check('optimizer: swapping the two kits is the same build', OPT.evaluate(swapped, g1).damage === OPT.evaluate(swapped, g2).damage && OPT.evaluate(swapped, g1) === OPT.evaluate(swapped, g2) ? 1 : 0, 1);
+
+  // Sequencing/engine features of the latest round
+  state = B.defaultState(); state.team[1] = B.newSlot('Liino', '', []); state.team[1].ue = 'full'; state.team[2] = B.newSlot('Perlica', '', []);
+  state.actions = [{ slot: 1, action: 'Ultimate', extraDelay: 0 }, { slot: 2, action: 'BattleSkill', extraDelay: 0 }];
+  view = B.simulate(state);
+  check('sequencing: Liino ult Electrification is visible on the next row at the same time (everything resolves at cast start)', view.rows[0].effects[5].some((e) => e.name === 'Electrification') && view.rows[1].effects[5].some((e) => e.name === 'Electrification') ? 1 : 0, 1);
+  r = crew([me('ZhuangFangyi', { gearPieces: set3('Xiranflow') })]);
+  r.run([script(0, function* (a) { a.applyReaction('Electric', 4); a.consumeReaction('Electrification'); })]);
+  check('stacks: consuming level 4 with a cap of 3 leaves 3 live stacks', r.effectTimeline.filter((e) => e.name === 'XiranflowBuff' && e.end > r.now).length, 3);
+  r = crew([me('ZhuangFangyi'), me('Perlica')]);
+  r.run([step(0, 'PerfectDodge')]);
+  check('perfect dodge: +7.5 SP and the team SP regen pauses for the 0.5s dodge', r.team.sp, 207.5);
+  r = crew([me('ZhuangFangyi'), me('Perlica')]); r.run([step(1, 'PerfectDodge')]);
+  check('perfect dodge: only the controlled operator', r.timeline[0].invalid ? 1 : 0, 1);
+  r = crew([me('ZhuangFangyi'), me('Perlica')]);
+  r.run([{ operator: 1, action: 'TakeDamage', hp: 55 }, { operator: 0, action: 'EnemyCharge' }]);
+  const attacked = r.eventLog.find((e) => e.type === 'OperatorAttacked');
+  check('take damage / enemy charge: events carry HP and the controlled flag; HP% is kept', attacked.hpAfter * 10 + (attacked.controlled ? 1 : 0) + r.operators[1].hpPercent * 1000 + (r.eventLog.some((e) => e.type === 'EnemyChargeStart') ? 100 : 0), 55000 + 550 + 100 + 0, 1e-9);
+  r = crew([me('ZhuangFangyi')]);
+  r.run([script(0, function* (a) { a.grantLink(2, 10); }), step(0, 'BattleSkill'), step(0, 'BattleSkill')]);
+  const linkHits = r.damageLog.filter((h) => h.category === 'BattleSkill');
+  check('Link: a Battle Skill sees the stacks (2 -> x1.45) and consumes them when it ends', linkHits[0].factors.link * 100 + linkHits[linkHits.length - 1].factors.link, 145 + 1, 1e-6);
+  const randomOutcomes = [{ p: 0.1, v: 4.8, kind: 'damage' }, { p: 0.9, v: 3, kind: 'damage' }];
+  const randomValue = (mode, outcomes, averageable = true) => { const x = crew([me('ZhuangFangyi')], d.enemies.TestDummy, { criticalMode: mode }); const ability = x.contextFor(x.operators[0], 'BattleSkill'); return ability.resolveRandom(outcomes, averageable).reduce((sum, { outcome, weight }) => sum + outcome.v * weight, 0); };
+  check('random: mean mode averages (10% 480%, 90% 300% = 318%)', randomValue('mean', randomOutcomes), 3.18, 1e-9);
+  check('random: median mode takes the most likely outcome (300%)', randomValue('median', randomOutcomes), 3, 1e-9);
+  check('random: equal chances are averaged even in median mode', randomValue('median', [{ p: 0.5, v: 4, kind: 'damage' }, { p: 0.5, v: 2, kind: 'damage' }]), 3, 1e-9);
+  const pickKind = (mode, outcomes) => { const x = crew([me('ZhuangFangyi')], d.enemies.TestDummy, { criticalMode: mode }); return x.contextFor(x.operators[0], 'BattleSkill').resolveRandom(outcomes, false)[0].outcome.kind; };
+  check('random: non-averageable outcomes use the median even in mean mode; ties prefer Effect > Damage > Heal', [pickKind('mean', [{ p: 0.6, kind: 'damage' }, { p: 0.4, kind: 'effect' }]), pickKind('mean', [{ p: 0.5, kind: 'heal' }, { p: 0.5, kind: 'damage' }]), pickKind('median', [{ p: 0.5, kind: 'damage' }, { p: 0.5, kind: 'effect' }])].join() === 'damage,damage,effect' ? 1 : 0, 1);
+  r = crew([me('ZhuangFangyi')]);
+  r.run([script(0, function* (a) { a.applySlow(5); a.applyCrystals(5, { shatter: { multiplier: 4, stagger: 10 }, effectName: 'RealspaceStasis' }); a.applyVulnerable(1); })]);
+  check('slow tag, crystals shattered by Vulnerable (hit credited to the owner), crystals gone', (r.enemy.status.tags(1).includes('Slowed') ? 1 : 0) * 100 + r.damageLog.filter((h) => h.multiplier === 4 && h.category === 'ComboSkill').length * 10 + (r.enemy.status.hasCrystals(1) ? 1 : 0), 110);
+  r = crew([me('ZhuangFangyi')], { ...d.enemies.TestDummy, hp: 100 });
+  r.run([script(0, function* (a) { a.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 1 }); })]);
+  check('enemy HP: the BelowHalfHP tag follows the damage dealt', r.enemy.status.tags(1).includes('BelowHalfHP') ? 1 : 0, 1);
+
+  // Estella
+  const estellaRun = (entries, member = {}) => { const x = crew([me('Estella', member)]); x.run(entries); return x; };
+  const solidify = function* (a) { a.applyInfliction('Heat', 1); a.applyInfliction('Cryo', 1); };
+  r = estellaRun([script(0, solidify), step(0, 'ComboSkill'), step(0, 'BattleSkill')]);
+  check('Estella: combo vs Solidification = 630% and Physical Susceptibility 15%', r.damageLog.find((h) => h.category === 'ComboSkill').multiplier * 100 + (r.enemy.status.hasSusceptibility('Physical', 0.5) ? 1 : 0), 631);
+  check('Estella: combo window opens on Solidification (no warning)', warned(r, /combo/), 0);
+  check('Estella: Shatter makes the next Battle Skill return 15 SP (200 - 100 + 15 + regen 16)', r.team.sp, 131);
+  r = estellaRun([step(0, 'ComboSkill')]);
+  check('Estella: without Solidification the combo is 360%', r.damageLog.find((h) => h.category === 'ComboSkill').multiplier, 3.6);
+  r = estellaRun([script(0, function* (a) { a.applySusceptibility('Physical', 0.1, 10); }), step(0, 'Ultimate')], { startUltimateEnergy: 70 });
+  check('Estella: ultimate 1100% and forced Lift on Physical Susceptibility', r.damageLog.find((h) => h.category === 'Ultimate').multiplier * 10 + (r.enemy.status.isLifted(0.5) ? 1 : 0), 111);
+  r = estellaRun([script(0, solidify)], { potential: 5 });
+  check('Estella P5: +5 Ultimate Energy after applying Solidification', r.operators[0].ultimateEnergy, 5, 1e-6);
+  r = estellaRun([step(0, 'BattleSkill')], { potential: 3 });
+  check('Estella P3: Battle Skill 350% x1.4', r.damageLog.find((h) => h.category === 'BattleSkill').multiplier, 4.9, 1e-9);
 
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,

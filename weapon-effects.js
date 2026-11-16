@@ -9,7 +9,7 @@
   const give = (to, name, mods, duration, extra = {}) => ({ to, name, mods, duration, ...extra });
   const castBy = (...categories) => ({ event }) => categories.includes(event.source.category);
   const isSkill = castBy('BattleSkill', 'ComboSkill', 'Ultimate');
-  const notBasicAttack = ({ event }) => event.source.category !== 'BasicAttack'; // "skill recovers SP"
+  const notBasicAttack = ({ event }) => !['BasicAttack', 'PerfectDodge'].includes(event.source.category); // "skill recovers SP"
   const eventIs = (key, ...values) => ({ event }) => values.includes(event[key]);
   const isArtsSusceptibility = ({ event }) => ['Arts', 'Heat', 'Electric', 'Cryo', 'Nature'].includes(event.element); // elemental Susceptibility counts as Arts (measured with Type 42)
   const all = (...conditions) => (context) => conditions.every((condition) => condition(context));

@@ -2,7 +2,8 @@
 // Not built yet: Combo/Ultimate/Finisher/Dive, time freeze, inflictions/reactions, triggers, crit counters.
 (function () {
   const E = globalThis.Endfield;
-  const MAX_SP = 300, SP_REGEN_PER_SECOND = 8, SWITCH_BACK_LOCK = 1, BASIC_ATTACK_RESET_GAP = 1, UE_PER_100_SP = 6.5, COMBO_WINDOW = 10, DEFAULT_ACTION_DURATION = 1;
+  const MAX_SP = 300, SP_REGEN_PER_SECOND = 8, SWITCH_BACK_LOCK = 1, BASIC_ATTACK_RESET_GAP = 1, UE_PER_100_SP = 6.5, COMBO_WINDOW = 10, DEFAULT_ACTION_DURATION = 1, DEFAULT_DODGE_DURATION = 0.5;
+  const INSTANT_ACTIONS = ['Tactical', 'TakeDamage', 'EnemyCharge']; // no time, no lock
 
   class Team {
     constructor(startingSP) { this.sp = startingSP; this.spSyncedAt = 0; this.spRegenPausedUntil = 0; this.stacks = {}; }
@@ -21,16 +22,29 @@
       }
     }
     countStacks(name, now) { return (this.stacks[name] || []).filter((stack) => stack.expires > now).length; }
+    // Link: team stacks (max 4) with their own timers. A Battle Skill / Ultimate sees the stacks present when it starts and consumes exactly those when it ends.
+    addLink(count, duration, now) {
+      const list = (this.links = (this.links || []).filter((link) => link.expires > now));
+      for (let i = 0; i < count; i++) {
+        list.push({ expires: now + duration, record: this.simulation && this.simulation.logEffect('Team', 'Link', { end: now + duration, stack: true, icon: 'Link' }) });
+        if (list.length > 4) { const removed = list.shift(); if (this.simulation) this.simulation.endEffect(removed.record); }
+      }
+    }
+    activeLinks(now) { return (this.links || []).filter((link) => link.expires > now); }
+    removeLinks(entries, now) { this.links = (this.links || []).filter((link) => !entries.includes(link)); for (const link of entries) if (this.simulation) this.simulation.endEffect(link.record); }
   }
 
   class EnemyState {
-    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; }
+    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; this.damageTaken = 0; }
+    hpFraction() { return Math.max(0, 1 - this.damageTaken / this.data.hp); } // from the damage dealt so far
     finisherPending(time) { return this.isStaggered(time) && !this.finisherUsed; } // one Finisher per Staggered window
     isStaggered(time) { return time < this.staggeredUntil; }
     addStagger(amount, time) {
       if (this.isStaggered(time)) return;
+      const before = this.stagger;
       this.stagger += amount;
-      if (this.stagger >= this.data.staggerCapacity) { this.stagger = 0; this.staggeredUntil = time + this.data.staggeredRecovery; this.finisherUsed = false; if (this.simulation) this.simulation.logEffect('Enemy', 'Staggered', { end: this.staggeredUntil, icon: 'Staggered' }); }
+      for (const node of this.data.staggerNodes || []) if (before < node && this.stagger >= node && this.simulation) this.simulation.emit('StaggerNode', {});
+      if (this.stagger >= this.data.staggerCapacity) { this.stagger = 0; this.staggeredUntil = time + this.data.staggeredRecovery; this.finisherUsed = false; if (this.simulation) this.simulation.logEffect('Enemy', 'Staggered', { end: this.staggeredUntil, icon: 'Staggered' }); if (this.simulation) this.simulation.emit('EnemyStaggered', {}); }
     }
     forDamage(time) {
       return { tier: this.data.tier, defense: this.data.defense, resistance: this.data.resistance, staggered: this.isStaggered(time), resistanceShred: this.status.resistanceShred(time), modifiers: this.status.modifiers(time), tags: this.status.tags(time) };
@@ -52,8 +66,9 @@
       this.form = null; this.formUntil = -Infinity; this.sequenceKey = 'base'; this.comboWindowUntil = -Infinity;
       this.consumable = member.consumable || null; // food: activates once when the battle starts
       this.tactical = member.tactical || null; this.tacticalUses = this.tactical ? this.tactical.maxUses : 0;
+      this.hpPercent = 100; this.shield = null; // HP only changes through Take Damage actions
       const combo = this.definition.kit && this.definition.kit.comboSkill; // combo skill trigger conditions open a 10s window
-      for (const windowTrigger of (combo && combo.windowTriggers) || []) this.triggers.push({ on: windowTrigger.on, by: 'any', when: windowTrigger.when, apply: ({ now }) => { this.comboWindowUntil = now + COMBO_WINDOW; }, lastFired: -Infinity });
+      for (const windowTrigger of (combo && combo.windowTriggers) || []) this.triggers.push({ on: windowTrigger.on, by: 'any', when: windowTrigger.when, apply: (context) => { this.comboWindowUntil = context.now + COMBO_WINDOW; if (windowTrigger.capture) this.comboCapture = windowTrigger.capture(context); }, lastFired: -Infinity });
     }
     inForm(name, now) { return this.form === name && this.formUntil > now; }
     currentForm(now) { return this.form && this.formUntil > now ? ((this.definition.kit.forms || {})[this.form] || {}) : null; }
@@ -144,6 +159,23 @@
       this.operator.ultimateEnergy -= cost; // tacticals are checked after the cast has resolved (see castSkill)
     }
     enterForm(name, duration) { this.simulation.logEffect(this.operator.name, 'Form: ' + name, { end: this.now + duration }); Object.assign(this.operator, { form: name, formUntil: this.now + duration, basicAttackIndex: 0 }); }
+    // Hits of one cast can be spread over time WITHOUT delaying anything else: the whole script resolves at cast start, advance() only moves the timestamp of what follows.
+    advance(seconds) { this.timeOffset = (this.timeOffset || 0) + seconds; this.simulation.virtualOffset = this.timeOffset; }
+    // Random outcomes [{ p, kind: 'effect'|'damage'|'heal', ...payload }]. Mean mode averages what can be averaged (weights = chances); median mode takes the most likely
+    // outcome(s), equal chances still averaged. Outcomes that cannot be averaged (different effects) always use the median; ties pick Effects > Damage > Heal.
+    resolveRandom(outcomes, averageable = true) {
+      const total = outcomes.reduce((sum, o) => sum + o.p, 0), best = Math.max(...outcomes.map((o) => o.p));
+      if (averageable && this.simulation.criticalMode !== 'median') return outcomes.map((outcome) => ({ outcome, weight: outcome.p / total }));
+      const top = outcomes.filter((o) => o.p >= best - 1e-9);
+      if (averageable) return top.map((outcome) => ({ outcome, weight: 1 / top.length }));
+      const order = { effect: 0, damage: 1, heal: 2 };
+      return [{ outcome: top.sort((a, b) => (order[a.kind] ?? 3) - (order[b.kind] ?? 3))[0], weight: 1 }];
+    }
+    grantLink(count, duration) { this.team.addLink(count, duration, this.now); this.simulation.emit('LinkGranted', { source: this }); }
+    applySlow(duration) { this.enemy.status.applySlow(this, duration); }
+    applyWeakness(duration) { this.enemy.status.applyWeakness(this, duration); }
+    applyCrystals(duration, options) { this.enemy.status.applyCrystals(this, duration, options); }
+    consumeCrystals(options) { return this.enemy.status.consumeCrystals(this, options); }
     setLabel(text) { if (this.record) this.record.label = text; } // action name shown in the sequence
     trackState(name, duration) { return this.simulation.logEffect(this.operator.name, name, { end: this.now + duration, stack: true }); } // UI-only state (stances, arrays)
     endState(record) { this.simulation.endEffect(record); }
@@ -151,7 +183,7 @@
     applyImprisonment(duration, onNaturalEnd) { this.enemy.status.applyImprisonment(this, duration, onNaturalEnd); }
     endImprisonment() { this.enemy.status.endImprisonment(); }
     extendLift(until) { this.enemy.status.extendLift(until); }
-    hit(instance) { this.simulation.dealDamage(this.operator, this.snapshotAttacker(), instance, this); }
+    hit(instance) { this.simulation.dealDamage(this.operator, this.snapshotAttacker(), this.linkStacks && instance.linkStacks === undefined ? { ...instance, linkStacks: this.linkStacks } : instance, this); }
   }
 
   class Simulation {
@@ -161,7 +193,7 @@
       this.team = new Team(startingSP); this.enemy = new EnemyState(enemy); this.criticalMode = criticalMode;
       this.controlled = this.operators[0]; this.now = 0; this.events = []; this.sequenceNumber = 0;
       this.damageLog = []; this.warnings = []; this.timeline = []; this.listeners = []; this.eventLog = [];
-      this.enemy.status = new E.StatusEngine(this); this.triggerDepth = 0; this.flags = {}; this.effectTimeline = []; this.orderCounter = 0; this.currentEntryIndex = undefined; this.suppressOperatorLog = false;
+      this.enemy.status = new E.StatusEngine(this); this.triggerDepth = 0; this.flags = {}; this.effectTimeline = []; this.orderCounter = 0; this.currentEntryIndex = undefined; this.suppressOperatorLog = false; this.virtualOffset = 0;
       for (const operator of this.operators) operator.simulation = this;
       this.team.simulation = this; this.enemy.simulation = this;
       this.enemy.stagger = initialStagger; // e.g. a boss phase that starts Staggered:
@@ -177,10 +209,11 @@
         for (const trigger of owner.triggers) {
           if (trigger.on !== type) continue;
           if ((trigger.by || 'self') === 'self' && (!event.source || event.source.operator !== owner)) continue;
-          if (this.now - trigger.lastFired < (trigger.cooldown || 0)) continue;
+          const time = this.now + this.virtualOffset; // hits spread over a cast keep their own time for cooldowns
+          if (time - trigger.lastFired < (trigger.cooldown || 0)) continue;
           const context = { event, owner, simulation: this, now: this.now };
           if (trigger.when && !trigger.when(context)) continue;
-          trigger.lastFired = this.now;
+          trigger.lastFired = time;
           if (trigger.give) this.giveEffect(trigger.give, context);
           if (trigger.apply) trigger.apply(context);
         }
@@ -190,13 +223,14 @@
     applyToTeam(name, modifiers, duration) { this.giveEffect({ to: 'team', name, mods: modifiers, duration }, { owner: this.operators[0], now: this.now, event: {} }); }
     dealDamage(operator, snapshot, instance, source = { operator }) {
       const result = E.computeDamage(instance, snapshot, this.enemy.forDamage(this.now), { criticalMode: this.criticalMode });
-      this.damageLog.push({ time: this.now, entry: this.currentEntryIndex !== undefined ? this.currentEntryIndex : source.entryIndex, operator: operator.name, element: instance.element, category: instance.category, subtype: instance.subtype, multiplier: instance.multiplier, damage: result.damage, factors: result.factors });
+      this.damageLog.push({ time: this.now + this.virtualOffset, entry: this.currentEntryIndex !== undefined ? this.currentEntryIndex : source.entryIndex, operator: operator.name, element: instance.element, category: instance.category, subtype: instance.subtype, multiplier: instance.multiplier, damage: result.damage, factors: result.factors });
       if (instance.subtype !== 'DoT') { // expected-value crit counters: +crit rate per hit, event at 1
         const counters = operator.critCounters, rate = Math.min(1, snapshot.criticalRate + (instance.extraCriticalRate || 0));
         const advance = (key, scope) => { counters[key] += rate; if (counters[key] >= 1 - 1e-9) { counters[key] -= 1; this.emit('CriticalHit', { source, scope }); } };
         advance('overall', 'overall');
         if (instance.category === 'BattleSkill' || instance.category === 'ComboSkill') advance('skill', 'skill');
       }
+      this.enemy.damageTaken += result.damage;
       this.emit('DamageDealt', { source, category: instance.category, subtype: instance.subtype, element: instance.element });
       return result.damage;
     }
@@ -258,7 +292,10 @@
     }
     runAbility(generator, ability, background = false) {
       const step = () => {
-        const next = generator.next();
+        const previousOffset = this.virtualOffset;
+        this.virtualOffset = ability ? ability.timeOffset || 0 : 0;
+        let next;
+        try { next = generator.next(); } finally { this.virtualOffset = previousOffset; }
         if (!next.done) this.schedule(this.now + next.value.seconds, step);
         else if (!background) { this.emit('SkillEnd', { source: ability }); this.releaseArmedEffects(ability); }
       };
@@ -273,7 +310,7 @@
       this.checkTacticals();
       actionList.forEach((entry, index) => {
         const operator = this.operators[entry.operator];
-        let start = entry.action === 'Tactical' ? previousStart + (entry.extraDelay || 0) : Math.max(operator.lockEnd, previousStart) + (entry.extraDelay || 0); // tacticals take no time and ignore locks
+        let start = INSTANT_ACTIONS.includes(entry.action) ? previousStart + (entry.extraDelay || 0) : Math.max(operator.lockEnd, previousStart) + (entry.extraDelay || 0); // tacticals take no time and ignore locks
         if (entry.action === 'Switch') start = Math.max(start, operator.switchedAwayAt + SWITCH_BACK_LOCK);
         this.runUntil(start);
         const record = { index, operator: operator.name, action: entry.action, start };
@@ -284,7 +321,7 @@
         this.currentEntryIndex = index;
         this.perform(entry, operator, start, index);
         this.currentEntryIndex = undefined;
-        record.end = entry.action === 'Tactical' ? start : Math.max(start, operator.lockEnd); record.controlled = this.controlled.name; record.afterOrder = this.orderCounter;
+        record.end = INSTANT_ACTIONS.includes(entry.action) ? start : Math.max(start, operator.lockEnd); record.controlled = this.controlled.name; record.afterOrder = this.orderCounter;
       });
       this.horizon = Math.max(0, ...this.operators.map((operator) => operator.lockEnd));
       this.runUntil(this.horizon);
@@ -306,6 +343,7 @@
         case 'BattleSkill': return kit.battleSkill ? null : 'operator has no battle skill';
         case 'ComboSkill': return kit.comboSkill ? null : 'operator has no combo skill';
         case 'Ultimate': return kit.ultimate ? null : 'operator has no ultimate';
+        case 'PerfectDodge': return controlled ? null : 'only the controlled operator can dodge';
         case 'Tactical': return !operator.tactical ? 'no tactical equipped' : operator.tacticalUses > 0 ? null : 'no tactical uses left';
         default: return null;
       }
@@ -317,8 +355,11 @@
       const castSkill = (category, run) => { // default 1s lock; the skill script may override with lockFor()
         ability.category = category;
         ability.lockFor(DEFAULT_ACTION_DURATION);
+        const links = category === 'BattleSkill' || category === 'Ultimate' ? this.team.activeLinks(this.now) : [];
+        ability.linkStacks = links.length;
         this.emit('SkillCast', { source: ability, category });
         this.runAbility(run(ability), ability);
+        if (links.length) this.team.removeLinks(links, this.now);
         this.checkTacticals();
       };
       if (entry.action === 'Switch') {
@@ -361,6 +402,18 @@
             ability.dealStagger(attack.stagger * (1 + finalStrike.staggerBonus));
           }
         })(), ability);
+      } else if (entry.action === 'TakeDamage') { // scripted: the operator is hit by an enemy; hp = HP% afterwards (omitted: unchanged)
+        const before = operator.hpPercent;
+        if (entry.hp !== undefined && entry.hp !== null) operator.hpPercent = entry.hp;
+        ability.setLabel(`${operator.name} takes damage` + (entry.hp !== undefined && entry.hp !== null ? ` (HP ${operator.hpPercent}%)` : ''));
+        this.emit('OperatorAttacked', { source: ability, target: operator, hpBefore: before, hpAfter: operator.hpPercent, controlled: this.controlled === operator });
+      } else if (entry.action === 'EnemyCharge') { // scripted: the enemy starts charging up a skill
+        ability.setLabel('Enemy starts charging a skill'); this.emit('EnemyChargeStart', { source: ability });
+      } else if (entry.action === 'PerfectDodge') { // +7.5 SP, the team's SP regeneration pauses for 0.5s; the dodge time is operator-dependent (kit.dodge.duration)
+        ability.lockFor((kit.dodge && kit.dodge.duration) || DEFAULT_DODGE_DURATION); ability.setLabel('Perfect Dodge');
+        ability.restoreSkillPoints(7.5);
+        this.team.spRegenPausedUntil = Math.max(this.team.spRegenPausedUntil, this.now + 0.5);
+        this.emit('PerfectDodge', { source: ability });
       } else if (entry.action === 'Tactical') {
         this.useTactical(operator, true); ability.setLabel('Tactical: ' + operator.tactical.name);
       } else if (entry.action === 'Custom') { // scenario/test scripts: { script: function* (ability) {...}, lock?: seconds, category? }

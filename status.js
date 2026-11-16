@@ -9,7 +9,7 @@
     constructor(simulation) {
       this.sim = simulation; this.infliction = null; this.reactions = {};
       this.vulnerable = { stacks: 0, expires: -Infinity, records: [] }; this.breach = null;
-      this.liftedUntil = -Infinity; this.knockedDownUntil = -Infinity;
+      this.liftedUntil = -Infinity; this.knockedDownUntil = -Infinity; this.slowedUntil = -Infinity; this.crystals = null;
       this.effects = {}; // enemy debuffs from weapons/sets/abilities: name -> { modifiers, expires }
       this.dynamicEffects = {}; // name -> { expires, compute(time) -> modifiers }
     }
@@ -17,6 +17,8 @@
     setDynamicEffect(name, duration, compute) { if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name, { end: this.sim.now + duration }); this.dynamicEffects[name] = { expires: this.sim.now + duration, compute }; }
     tags(time) { // enemy-state tags usable by damage bonuses
       const tags = [];
+      if (time < this.slowedUntil) tags.push('Slowed');
+      if (this.sim.enemy.hpFraction() < 0.5) tags.push('BelowHalfHP');
       if (this.vulnerableStacks(time) > 0) tags.push('Vulnerable');
       const infliction = this.activeInfliction(time);
       if ((infliction && infliction.element === 'Cryo') || this.reaction('Solidification', time)) tags.push('CryoInflictionOrSolidification');
@@ -107,6 +109,34 @@
       return current.stacks;
     }
 
+    // ---- Slow, Weakness, Originium Crystals ----
+    applySlow(source, duration) {
+      this.slowedUntil = Math.max(this.slowedUntil, this.sim.now + duration);
+      this.sim.logEffect('Enemy', 'Slow', { end: this.slowedUntil, icon: 'Slow' }); this.sim.emit('SlowApplied', { source });
+    }
+    applyWeakness(source, duration) { this.sim.logEffect('Enemy', 'Weakness', { end: this.sim.now + duration, icon: 'Weakness' }); this.sim.emit('WeaknessApplied', { source }); }
+    // Crystals seal the enemy; a Physical Status / Vulnerable shatters them (options.shatter = { multiplier, stagger } credited to the owner); effectName = debuff tied to them.
+    applyCrystals(source, duration, { shatter, effectName } = {}) {
+      const now = this.sim.now;
+      if (this.crystals) this.consumeCrystals(source);
+      this.crystals = { owner: source.operator, until: now + duration, shatter, effectName, record: this.sim.logEffect('Enemy', 'Originium Crystals', { end: now + duration }) };
+      this.sim.emit('OriginiumCrystalsApplied', { source });
+    }
+    hasCrystals(time = this.sim.now) { return Boolean(this.crystals && this.crystals.until > time); }
+    consumeCrystals(source, { shatterDamage = false } = {}) {
+      if (!this.hasCrystals()) return false;
+      const crystals = this.crystals;
+      this.crystals = null; this.sim.endEffect(crystals.record);
+      if (crystals.effectName) { this.sim.endEffectsNamed('Enemy', crystals.effectName); if (this.effects[crystals.effectName]) this.effects[crystals.effectName].expires = -Infinity; }
+      this.sim.emit('OriginiumCrystalsConsumed', { source });
+      if (shatterDamage && crystals.shatter) {
+        const owner = this.sim.contextFor(crystals.owner, 'ComboSkill');
+        owner.hit({ element: 'Physical', category: 'ComboSkill', multiplier: crystals.shatter.multiplier });
+        if (crystals.shatter.stagger) owner.dealStagger(crystals.shatter.stagger);
+      }
+      return true;
+    }
+
     // ---- Imprisonment / Lift extension / susceptibility lookup ----
     isImprisoned(time = this.sim.now) { return Boolean(this.imprisonment && this.imprisonment.until > time); }
     applyImprisonment(source, duration, onNaturalEnd) {
@@ -119,7 +149,7 @@
     }
     endImprisonment() { if (this.imprisonment) { this.sim.endEffect(this.imprisonment.record); this.imprisonment.cancelled = true; this.imprisonment.until = -Infinity; } }
     extendLift(until) { if (this.isLifted()) this.liftedUntil = Math.max(this.liftedUntil, until); }
-    hasSusceptibility(element, time = this.sim.now) { const effect = this.effects['Susceptibility:' + element]; return Boolean(effect && effect.expires > time); }
+    hasSusceptibility(element, time = this.sim.now) { return this.modifiers(time).some((m) => m.stat === 'Susceptibility' && (m.tags || []).includes(element)); }
 
     // ---- Vulnerable and Physical Statuses ----
     addVulnerableStacks(count, source) {
@@ -129,6 +159,7 @@
       for (const record of records) record.end = expires; // shared, refreshed duration
       this.vulnerable = { stacks: Math.min(MAX_STACKS, stacksBefore + count), expires, records };
       this.sim.emit('VulnerableApplied', { source, count, stacksBefore });
+      this.consumeCrystals(source, { shatterDamage: true }); // Vulnerable shatters Originium Crystals
     }
     applyVulnerable(source, count = 1) { this.addVulnerableStacks(count, source); this.shatter(source); }
     shatter(source) { // any Vulnerable/Physical Status application pops Solidification
@@ -170,6 +201,7 @@
       }
       if (effective) this.sim.emit('PhysicalStatusApplied', { source, kind, stacksConsumed: stacks });
       this.shatter(source);
+      this.consumeCrystals(source, { shatterDamage: true });
       return { effective, stacksConsumed: stacks };
     }
   }

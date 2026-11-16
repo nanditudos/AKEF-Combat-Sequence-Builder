@@ -4,7 +4,7 @@
   const E = globalThis.Endfield, B = E.builder, D = E.data;
   const STORAGE_KEY = 'endfieldSimState.v1';
   const ACTION_LABEL = Object.fromEntries(B.ACTIONS);
-  const DEFAULT_LABEL = { BasicAttack: 'Basic Attack', BattleSkill: 'Battle Skill', ComboSkill: 'Combo Skill', Ultimate: 'Ultimate', Finisher: 'Finisher', DiveAttack: 'Dive Attack', Switch: 'Switch', Tactical: 'Tactical' };
+  const DEFAULT_LABEL = { BasicAttack: 'Basic Attack', BattleSkill: 'Battle Skill', ComboSkill: 'Combo Skill', Ultimate: 'Ultimate', Finisher: 'Finisher', DiveAttack: 'Dive Attack', Switch: 'Switch', Tactical: 'Tactical', PerfectDodge: 'Perfect Dodge', TakeDamage: 'Takes damage', EnemyCharge: 'Enemy charge' };
   const CRIT_HELP = { mean: 'Mean: every crit-capable hit deals the expected value, 1 + Crit Rate × Crit Damage. Best when Crit Rate is high.',
     median: 'Median: the most likely outcome. A hit always crits when Crit Rate is 50% or more and never crits below that. Best when Crit Rate is low.' };
   const sortedByTier = (map) => Object.entries(map || {}).sort((a, b) => b[1].tier - a[1].tier || a[1].name.localeCompare(b[1].name)).map(([key, item]) => [key, `${item.name} (${item.tier}★)`]);
@@ -143,6 +143,7 @@
       row.damage > 0 ? el('span', { class: 'dmg' }, fmt(row.damage)) : null,
       invalid ? el('span', { class: 'reason' }, record ? record.invalid : 'empty slot') : null,
       el('span', { class: 'ctl' },
+        entry.action === 'TakeDamage' ? numberInput(entry.hp === undefined ? 100 : entry.hp, (v) => update(() => { entry.hp = Math.max(0, Math.min(100, v)); }), { min: 0, max: 100, title: 'HP % after the hit' }) : null,
         numberInput(entry.extraDelay || 0, (v) => update(() => { entry.extraDelay = Math.max(0, v); }), { min: 0, step: 0.1, title: 'Extra delay (s)' }),
         el('button', { title: 'Move up', onclick: () => move(row.index, -1) }, '↑'), el('button', { title: 'Move down', onclick: () => move(row.index, 1) }, '↓'),
         el('button', { title: 'Remove', onclick: () => update(() => { state.actions.splice(row.index, 1); }) }, '✕')));
@@ -164,6 +165,10 @@
       if (column < 4) {
         const bar = el('div', { class: 'adds' });
         for (const [action, label] of B.ACTIONS) bar.append(el('button', { disabled: !state.team[column].op, title: action, onclick: () => update(() => { state.actions.push({ slot: column, action, extraDelay: 0 }); }) }, label));
+        cell.append(bar);
+      } else if (column === 5) { // scenario events of the enemy
+        const bar = el('div', { class: 'adds' });
+        for (const [action, label] of B.ENEMY_ACTIONS) bar.append(el('button', { disabled: !state.team.some((slot) => slot.op), title: 'Enemy starts charging a skill', onclick: () => update(() => { state.actions.push({ slot: 5, action, extraDelay: 0 }); }) }, label));
         cell.append(bar);
       }
       cells.push(cell);

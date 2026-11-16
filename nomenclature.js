@@ -72,7 +72,7 @@
   Object.assign(Endfield.STAT_NAMES, { STRBonus: 'fraction', AGLBonus: 'fraction', INTBonus: 'fraction', WILBonus: 'fraction', DEFBonus: 'fraction' });
   Endfield.TAGGED_STATS = ['DamageBonus', 'Amp', 'IgnoreResistance', 'Susceptibility', 'DamageTaken', 'MultiplicativeMultiplier', 'TreatmentBonus', 'Resistance'];
   Endfield.VALID_TAGS = ['Physical', 'Electric', 'Heat', 'Cryo', 'Nature', 'Arts', 'BasicAttack', 'BattleSkill', 'ComboSkill', 'Ultimate', 'Status',
-    'FinalStrike', 'Finisher', 'Dive', 'DoT', 'ArtsBurst', 'ArtsReaction', 'PhysicalStatus', 'Shatter', 'ExtraHit', 'Staggered', 'Vulnerable', 'CryoInflictionOrSolidification'];
+    'FinalStrike', 'Finisher', 'Dive', 'DoT', 'ArtsBurst', 'ArtsReaction', 'PhysicalStatus', 'Shatter', 'ExtraHit', 'Staggered', 'Vulnerable', 'CryoInflictionOrSolidification', 'Slowed', 'BelowHalfHP'];
 
   // Helpers that expand one wiki line into several modifiers (gear.js flattens these).
   Endfield.mods = {

@@ -68,6 +68,7 @@
         attackBeforeAttributes: baseAttack * (1 + atkBonusSum) + flatAtk, attack: this.attack(),
       };
     }
+    defense() { return ((this.baseStats.DEF || 0) + this.sum('DEF')) * (1 + this.sum('DEFBonus')); }
     criticalRate() { return Math.min(1, Math.max(0, 0.05 + this.sum('CriticalRate'))); }
     criticalDamage() { return 0.5 + this.sum('CriticalDamage'); }
     artsIntensity() { return this.sum('ArtsIntensity'); }

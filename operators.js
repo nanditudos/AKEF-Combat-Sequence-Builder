@@ -38,7 +38,7 @@
           ability.lockFor(ultimateActive ? 0.3 : 0.3 + 0.1 * sunderbladeCount);
           ability.setLabel(ultimateActive ? (free ? 'ULT Battle Skill (free)' : 'ULT Battle Skill') : 'Battle Skill');
           for (let hitNumber = 1; hitNumber <= sunderbladeCount; hitNumber++) { // everything resolves at cast start; the hits are 0.1s apart
-            if (hitNumber > 1) yield ability.wait(0.1);
+            if (hitNumber > 1) ability.advance(0.1);
             applyForceOfNature(operator.effects.ForceOfNature.state.value + 0.02); // measured: +2% applies before the hit's damage
             const base = ultimateActive ? 0.81 + 0.18 * consumedElectrificationLevel : 0.45 + 0.09 * consumedElectrificationLevel;
             ability.hit({ element: 'Electric', category: 'BattleSkill', multiplier: base * (hitNumber === sunderbladeCount ? 6 : 1) * (potential >= 1 ? 1.15 : 1) });
@@ -179,7 +179,7 @@
         const stance = startStance(ability, 'Cosmovoice', 15, [['LiinoStanceAttack', [atk(0.10 + (potential >= 1 ? 0.06 : 0))]], ['LiinoCosmovoiceAmp', [mod('Amp', amp, ['Electric']), mod('Amp', amp, ['Nature'])]]]);
         ability.announce('AmpGranted');
         ability.hit({ element: 'Electric', category: 'Ultimate', multiplier: 3.2 * scale }); // Stage Pyrotechnics
-        yield ability.wait(0.5);
+        ability.advance(0.5);
         ability.hit({ element: 'Electric', category: 'Ultimate', multiplier: 6.4 * scale }); // Electrifying Extravaganza
         ability.applyReaction('Electric', 1); // assumption: forced Electrification level 1
         ability.dealStagger(20);
@@ -229,7 +229,7 @@
           ability.endImprisonment();
           ability.hit({ element: 'Nature', category: 'ComboSkill', multiplier: explosionMultiplier(potential) }); ability.dealStagger(5); // Explosion (assumed ComboSkill category)
           ability.applySusceptibility('Nature', 0.04, 2); ability.applySusceptibility('Cryo', 0.04, 2);
-          ability.background((function* () { yield ability.wait(0.5); ability.hit({ element: 'Nature', category: 'ComboSkill', multiplier: 5.0 }); })()); // bonus hits after a short delay (assumed 0.5s, one hit)
+          ability.advance(0.5); ability.hit({ element: 'Nature', category: 'ComboSkill', multiplier: 5.0 }); // bonus hits after a short delay (assumed 0.5s, one hit)
         }
       } },
       comboSkill: {
@@ -289,7 +289,7 @@
       battleSkill: { *run(ability) {
         ability.spendSkillPoints(100);
         ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: 2.19 }); // gravity pull (1s split into 2 slices, each hit at the start of its slice)
-        yield ability.wait(0.5);
+        ability.advance(0.5);
         ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: 1.3 }); // explosion
         ability.applyInfliction('Nature', 1); ability.dealStagger(10);
       } },
@@ -366,4 +366,5 @@
       } },
     },
   };
+  E.opkit = { batk, P, enemyInflictionElement, hasVulnerable, vulnerableStacksAfter }; // shared with operators2.js
 })();
