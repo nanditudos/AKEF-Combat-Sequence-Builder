@@ -6,6 +6,16 @@
   E.icons = E.icons || {};
   E.ICON_PATH = 'icons/';
   const ELEMENTS = ['Electric', 'Heat', 'Cryo', 'Nature'];
+  const isSubset = (subset, superset) => subset.every(element => superset.includes(element));
+  const isElemental = (subset) => isSubset(subset,ELEMENTS);
+  
+  Endfield.icons['Form: Empyrean'] = 'icons/ZhuangFangyi_FormEmpyrean.webp';
+  Endfield.icons['Sunderblade'] = 'icons/ZhuangFangyi_Sunderblade.webp';
+  Endfield.icons['Imprisonment'] = 'icons/Arcane_Imprisonment.webp';
+  Endfield.icons['Gloompurge Array'] = 'icons/Arcane_GloompurgeArray.webp';
+  Endfield.icons['Vocalist Stance'] = 'icons/Liino_VocalistStance.webp';
+  Endfield.icons['Starry Boost of 1st Magnitude'] = 'icons/Liino_StarryBoost.webp';
+  Endfield.icons['Cosmovoice Stance'] = 'icons/Liino_CosmovoiceStance.webp';
 
   E.roman = (n) => { // stack counts and levels are shown as Roman numerals, like in game
     let rest = Math.max(0, Math.round(n)), out = '';
@@ -21,16 +31,18 @@
     const stats = new Set(modifiers.map((m) => m.stat));
     if (stats.has('Amp')) {
       const tags = tagsOf(modifiers, 'Amp');
-      return tags.length === 1 && ELEMENTS.includes(tags[0]) ? tags[0] + '_Amp' : tags.length === 1 && tags[0] === 'Arts' ? 'Arts_Amp' : 'Generic_Amp';
+      return tags.length === 1 && ELEMENTS.includes(tags[0]) ? tags[0] + '_Amp' : ((tags.length === 1 && tags[0] === 'Arts') || (tags.length > 1 && isElemental(tags))) ? 'Arts_Amp' : 'Generic_Amp';
     }
-    if (stats.has('Susceptibility')) { const tags = tagsOf(modifiers, 'Susceptibility'); return tags.length === 1 ? E.susceptibilityIcon(tags[0]) : 'Generic_Susceptibility'; }
-    for (const stat of ['DamageBonus', 'DamageTaken']) {
+    if (stats.has('Susceptibility')) { const tags = tagsOf(modifiers, 'Susceptibility'); return tags.length === 1 ? E.susceptibilityIcon(tags[0]) : (tags.length > 1 && isElemental(tags)?'Arts_Susceptibility':'Generic_Susceptibility'); }
+	for (const stat of ['DamageBonus', 'DamageTaken']) {
       if (!stats.has(stat)) continue;
-      const tags = tagsOf(modifiers, stat), elements = tags.filter((t) => [...ELEMENTS, 'Physical'].includes(t));
+      
+	  const tags = tagsOf(modifiers, stat), elements = tags.filter((t) => [...ELEMENTS, 'Physical'].includes(t));
+	  if (stat=='DamageTaken'&&tags.includes('Arts')) return 'Arts_DamageTaken';
       if (elements.length === 1) return 'Generic_' + elements[0];
       if (!elements.length && tags.includes('Arts')) return 'Generic_Physical'; // Aether is an unused artefact icon; Arts-only effects fall back to Generic_Physical
     }
-    if (stats.has('CriticalRate') || stats.has('CriticalDamage')) return 'Critical';
+    //if (stats.has('CriticalRate') || stats.has('CriticalDamage')) return 'Critical';
     if (stats.has('StaggerEfficiency')) return 'Generic_Stagger';
     if (modifiers.length && [...stats].every((stat) => DEFENSIVE.has(stat))) return 'Generic_Defense';
     return 'Generic_Attack';

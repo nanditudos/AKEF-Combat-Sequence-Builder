@@ -71,7 +71,7 @@
           ability.operator.flags.freeBattleSkill = true;
           ability.operator.flags.blockUltimateEnergyUntil = ability.now + 25;
           ability.operator.sheet.removeModifiersFrom('form:Empyrean'); // P5: part of the form itself, not a separate buff
-          if (ability.potential >= 5) ability.operator.sheet.addModifiers([{ ...mod('IgnoreResistance', 15, ['Electric']), expires: ability.now + 25 }], 'form:Empyrean');
+          if (ability.potential >= 5) ability.operator.sheet.addModifiers([{ ...mod('IgnoreResistance', 15, ['Electric']), expires: ability.now + 25}], 'form:Empyrean');
         },
       },
     },
@@ -176,7 +176,7 @@
         ability.spendUltimateEnergy(160); // two hits: the 1s is split into 2 slices, each hit at the start of its slice
         ability.grantTreatment();
         const amp = Math.min(0.60, 0.0004 * ability.operator.sheet.attribute('WIL')) * (potential >= 5 ? 1.2 : 1); // Amp from Will (assumed no base value)
-        const stance = startStance(ability, 'Cosmovoice', 15, [['LiinoStanceAttack', [atk(0.10 + (potential >= 1 ? 0.06 : 0))]], ['LiinoCosmovoiceAmp', [mod('Amp', amp, ['Electric']), mod('Amp', amp, ['Nature'])]]]);
+        const stance = startStance(ability, 'Cosmovoice', 15, [['LiinoStanceAttack', [atk(0.10 + (potential >= 1 ? 0.06 : 0))]], ['LiinoCosmovoiceElectricAmp', [mod('Amp', amp, ['Electric'])]], ['LiinoCosmovoiceNatureAmp', [mod('Amp', amp, ['Nature'])]]]);
         ability.announce('AmpGranted');
         ability.hit({ element: 'Electric', category: 'Ultimate', multiplier: 3.2 * scale }); // Stage Pyrotechnics
         ability.advance(0.5);
