@@ -10,6 +10,17 @@
       this.sim = simulation; this.infliction = null; this.reactions = {};
       this.vulnerable = { stacks: 0, expires: -Infinity }; this.breach = null;
       this.liftedUntil = -Infinity; this.knockedDownUntil = -Infinity;
+      this.effects = {}; // enemy debuffs from weapons/sets/abilities: name -> { modifiers, expires }
+      this.dynamicEffects = {}; // name -> { expires, compute(time) -> modifiers }
+    }
+    setEffect(name, modifiers, duration, now) { this.effects[name] = { modifiers, expires: now + duration }; if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name); }
+    setDynamicEffect(name, duration, compute) { if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name); this.dynamicEffects[name] = { expires: this.sim.now + duration, compute }; }
+    tags(time) { // enemy-state tags usable by damage bonuses
+      const tags = [];
+      if (this.vulnerableStacks(time) > 0) tags.push('Vulnerable');
+      const infliction = this.activeInfliction(time);
+      if ((infliction && infliction.element === 'Cryo') || this.reaction('Solidification', time)) tags.push('CryoInflictionOrSolidification');
+      return tags;
     }
     // ---- queries (time defaults to now) ----
     activeInfliction(time = this.sim.now) { return this.infliction && this.infliction.expires > time ? this.infliction : null; }
@@ -22,8 +33,10 @@
     // ---- values read by the damage engine (frozen at application, as agreed) ----
     modifiers(time) {
       const list = [];
+      for (const effect of Object.values(this.effects)) if (effect.expires > time) list.push(...effect.modifiers);
+      for (const effect of Object.values(this.dynamicEffects)) if (effect.expires > time) list.push(...effect.compute(time));
       const electrification = this.reaction('Electrification', time);
-      if (electrification) list.push({ stat: 'DamageTaken', value: (0.08 + 0.04 * electrification.level) * electrification.artsIntensityMultiplier, tags: ['Arts'] });
+      if (electrification) list.push({ stat: 'DamageTaken', value: (0.08 + 0.04 * electrification.level) * electrification.artsIntensityMultiplier * electrification.debuffScale, tags: ['Arts'] });
       if (this.breach && this.breach.expires > time) list.push({ stat: 'DamageTaken', value: this.breach.value, tags: ['Physical'] });
       return list;
     }
@@ -31,7 +44,7 @@
       const c = this.reaction('Corrosion', time);
       if (!c) return 0;
       const m = c.artsIntensityMultiplier, L = c.level;
-      return Math.min((8 + 4 * L) * m, (2.4 + 1.2 * L) * m + (0.56 + 0.28 * L) * m * (time - c.appliedAt));
+      return Math.min((8 + 4 * L) * m * c.shredScale, (2.4 + 1.2 * L) * m + (0.56 + 0.28 * L) * m * (time - c.appliedAt));
     }
 
     // ---- Arts ----
@@ -48,34 +61,36 @@
       }
       this.infliction = null; // mutually exclusive: converts into a reaction of the NEW element
       this.sim.emit('InflictionConsumed', { source, element: current.element, stacks: current.stacks });
-      this.applyReaction(source, element, current.stacks);
+      this.applyReaction(source, element, current.stacks, { natural: true });
     }
     applyArtsBurst(source, element) {
+      this.sim.emit('ArtsBurst', { source, element }); // weapon/set triggers apply before the Burst's own damage (measured)
       source.hit({ element, category: 'Status', subtype: 'ArtsBurst', statusKind: 'ArtsStatus', multiplier: 1.6 });
-      this.sim.emit('ArtsBurst', { source, element });
     }
-    applyReaction(source, element, level) { // always overwrites, resets everything, redeals the initial hit
+    // options: { duration, debuffScale (Electrification), shredScale (Corrosion max) }; default from definition.reactionOptions(source, element)
+    applyReaction(source, element, level, options) { // always overwrites, resets everything, redeals the initial hit
+      options = { ...((source.operator.definition.reactionOptions && source.operator.definition.reactionOptions(source, element)) || {}), ...(options || {}) }; // options.natural = came from an infliction conversion
       const now = this.sim.now, name = REACTION_OF[element];
       level = Math.min(MAX_STACKS, level);
       if (this.reactions[name]) this.reactions[name].cancelled = true;
       const snapshot = source.snapshotAttacker();
-      const duration = { Combustion: 10, Electrification: 6 + 6 * level, Solidification: 4.75 + level, Corrosion: 15 }[name];
-      const reaction = { name, element, level, appliedAt: now, expires: now + duration, cancelled: false, artsIntensityMultiplier: E.artsIntensityMultiplier(snapshot.artsIntensity) };
+      const duration = options.duration || { Combustion: 10, Electrification: 6 + 6 * level, Solidification: 4.75 + level, Corrosion: 15 }[name];
+      const reaction = { name, element, level, appliedAt: now, expires: now + duration, cancelled: false, debuffScale: options.debuffScale || 1, shredScale: options.shredScale || 1, artsIntensityMultiplier: E.artsIntensityMultiplier(snapshot.artsIntensity) };
       this.reactions[name] = reaction;
-      source.hit({ element, category: 'Status', subtype: 'ArtsReaction', statusKind: 'ArtsStatus', multiplier: 0.8 + 0.8 * level });
+      this.sim.emit('ReactionApplied', { source, name, level }); // triggers resolve before any damage (measured)
+      if (options.natural) source.hit({ element, category: 'Status', subtype: 'ArtsReaction', statusKind: 'ArtsStatus', multiplier: 0.8 + 0.8 * level }); // forced reactions deal no initial hit
       if (name === 'Combustion') { // hits at t=0 and every second through the duration (11 hits for 10s)
         for (let second = 0; second <= duration; second++) {
           const tick = () => { if (!reaction.cancelled) this.sim.dealDamage(source.operator, snapshot, { element: 'Heat', category: 'Status', subtype: 'DoT', statusKind: 'ArtsStatus', multiplier: 0.12 + 0.12 * level }, source); };
           if (second === 0) tick(); else this.sim.schedule(now + second, tick);
         }
       }
-      this.sim.emit('ReactionApplied', { source, name, level });
     }
     consumeReaction(name, source) {
       const r = this.reaction(name);
       if (!r) return 0;
       r.cancelled = true; r.expires = -Infinity;
-      this.sim.emit('ReactionConsumed', { source, name, level: r.level });
+      this.sim.emit('ReactionConsumed', { source, name, level: r.level, element: r.element });
       return r.level;
     }
     consumeInfliction(element, source) { // element optional: any
@@ -85,6 +100,19 @@
       this.sim.emit('InflictionConsumed', { source, element: current.element, stacks: current.stacks });
       return current.stacks;
     }
+
+    // ---- Imprisonment / Lift extension / susceptibility lookup ----
+    isImprisoned(time = this.sim.now) { return Boolean(this.imprisonment && this.imprisonment.until > time); }
+    applyImprisonment(source, duration, onNaturalEnd) {
+      const now = this.sim.now, token = { until: now + duration, cancelled: false };
+      if (this.imprisonment) this.imprisonment.cancelled = true;
+      this.imprisonment = token;
+      this.sim.schedule(now + duration - 1e-6, () => { if (!token.cancelled && onNaturalEnd) onNaturalEnd(); }); // tie-break: the Explosion lands just before same-duration effects (e.g. Susceptibility) expire (measured)
+      this.sim.emit('ImprisonmentApplied', { source });
+    }
+    endImprisonment() { if (this.imprisonment) { this.imprisonment.cancelled = true; this.imprisonment.until = -Infinity; } }
+    extendLift(until) { if (this.isLifted()) this.liftedUntil = Math.max(this.liftedUntil, until); }
+    hasSusceptibility(element, time = this.sim.now) { const effect = this.effects['Susceptibility:' + element]; return Boolean(effect && effect.expires > time); }
 
     // ---- Vulnerable and Physical Statuses ----
     addVulnerableStacks(count, source) {
@@ -127,8 +155,9 @@
           this.breach = { expires: now + 6 + 6 * stacks, value: (0.08 + 0.04 * stacks) * aim };
         }
       }
-      if (effective) this.sim.emit('PhysicalStatusApplied', { source, kind });
+      if (effective) this.sim.emit('PhysicalStatusApplied', { source, kind, stacksConsumed: stacks });
       this.shatter(source);
+      return { effective, stacksConsumed: stacks };
     }
   }
   E.StatusEngine = StatusEngine;

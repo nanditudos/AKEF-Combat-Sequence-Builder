@@ -33,8 +33,9 @@
   function computeDamage(instance, attacker, enemy, { criticalMode = 'mean' } = {}) {
     const tags = [instance.element, instance.category];
     if (instance.subtype) tags.push(instance.subtype);
-    if (ARTS_ELEMENTS.includes(instance.element)) tags.push('Arts');
+    if (ARTS_ELEMENTS.includes(instance.element)) tags.push('Arts'); // Arts = Electric/Heat/Nature/Cryo; also on Burst/Reaction/DoT hits (measured: Arts Damage Taken boosted an Electric Burst)
     if (enemy.staggered) tags.push('Staggered');
+    if (enemy.tags) tags.push(...enemy.tags);
     if (instance.extraTags) tags.push(...instance.extraTags);
 
     const sumAttacker = (stat) => Endfield.sumModifiers(attacker.modifiers, stat, tags);
@@ -56,7 +57,7 @@
       baseMultiplier: instance.multiplier,
       statusScaling: statusScaling(instance.statusKind, attacker.level, attacker.artsIntensity),
       multiplierGroup: 1 + sumAttacker('DamageBonus'),
-      critical: canCritical ? criticalMultiplier(criticalMode, attacker.criticalRate, attacker.criticalDamage) : 1,
+      critical: canCritical ? criticalMultiplier(criticalMode, Math.min(1, attacker.criticalRate + (instance.extraCriticalRate || 0)), attacker.criticalDamage) : 1,
       amp: 1 + sumAttacker('Amp'),
       stagger: enemy.staggered ? 1.3 : 1,
       finisher: instance.subtype === 'Finisher' ? FINISHER_MULTIPLIER[enemy.tier] : 1,

@@ -1,60 +1,192 @@
-// One line per piece. DEF and other irrelevant stats are omitted on purpose.
-// Set bonuses: stat modifiers + triggers (see sim.js dispatchTriggers). Gold sets only (Lv 60/70).
+// Equipment: one line per piece, maxed (Artificing) stats. set '' = no set bonus. Stats are kept even if the simulation does not use them.
+// Set bonuses (stat modifiers + triggers) are in sets.js. Keyword reference: nomenclature.js
 (function () {
   const { mod } = globalThis.Endfield;
   const gear = (Endfield.data.gear = Endfield.data.gear || { armor: [], gloves: [], kits: [], setBonuses: {} });
-  const piece = (name, set, ...modifiers) => ({ name, set, modifiers });
-
-  gear.armor.push(piece('Xiranflow Light Armor', 'Xiranflow', mod('WIL', 113), mod('INT', 75), mod('DamageBonus', 0.149, ['Cryo']), mod('DamageBonus', 0.149, ['Electric'])));
-  gear.gloves.push(piece('Xiranflow Gloves', 'Xiranflow', mod('WIL', 84), mod('INT', 55), mod('DamageBonus', 0.249, ['Cryo']), mod('DamageBonus', 0.249, ['Electric'])));
-  gear.kits.push(piece('Xiranflow Baton', 'Xiranflow', mod('WIL', 41), mod('INT', 27), mod('DamageBonus', 0.538, ['BattleSkill'])));
-  gear.kits.push(piece('LYNX Slab', 'LYNX', mod('WIL', 41), mod('INT', 27), mod('MainAttributeBonus', 0.269)));
-
-  const sets = gear.setBonuses;
-  const isSource = (names, key = 'name') => ({ event }) => names.includes(event[key]);
-  const skillTags = ['BattleSkill', 'ComboSkill', 'Ultimate'];
-
-  sets.Xiranflow = { modifiers: [mod('ATKBonus', 0.10)], triggers: [{
-    on: 'ReactionConsumed', when: isSource(['Electrification', 'Corrosion']),
-    apply: ({ event, owner, now }) => owner.addStacks('XiranflowBuff', event.level, { modifiers: [mod('DamageBonus', 0.15, ['Electric']), mod('DamageBonus', 0.15, ['Nature'])], duration: 25, maxStacks: 3 }, now) }] };
-
-  sets['Pulser Labs'] = { modifiers: [mod('ArtsIntensity', 30)], triggers: [
-    { on: 'ReactionApplied', when: isSource(['Electrification']), apply: ({ owner, now }) => owner.setEffect('PulserElectric', [mod('DamageBonus', 0.5, ['Electric'])], 10, now, {}) },
-    { on: 'ReactionApplied', when: isSource(['Solidification']), apply: ({ owner, now }) => owner.setEffect('PulserCryo', [mod('DamageBonus', 0.5, ['Cryo'])], 10, now, {}) }] };
-
-  sets['Hot Work'] = { modifiers: [mod('ArtsIntensity', 30)], triggers: [
-    { on: 'ReactionApplied', when: isSource(['Combustion']), apply: ({ owner, now }) => owner.setEffect('HotWorkHeat', [mod('DamageBonus', 0.5, ['Heat'])], 10, now, {}) },
-    { on: 'ReactionApplied', when: isSource(['Corrosion']), apply: ({ owner, now }) => owner.setEffect('HotWorkNature', [mod('DamageBonus', 0.5, ['Nature'])], 10, now, {}) }] };
-
-  sets['Tide Surge'] = { modifiers: skillTags.map((tag) => mod('DamageBonus', 0.20, [tag])), triggers: [{
-    on: 'InflictionBatch', when: ({ event }) => event.stacks >= 2,
-    apply: ({ owner, now }) => owner.setEffect('TideSurgeArts', [mod('DamageBonus', 0.35, ['Arts'])], 15, now, {}) }] };
-
-  sets['Deep Rampart'] = { modifiers: [mod('DamageBonus', 0.16, ['Arts'])], triggers: [{
-    on: 'ArtsBurst', cooldown: 0.1, when: isSource(['Nature', 'Cryo'], 'element'),
-    apply: ({ owner, now }) => owner.addStacks('DeepRampartIntensity', 1, { modifiers: [mod('ArtsIntensity', 16)], duration: 20, maxStacks: 3 }, now) }] };
-
-  sets['Æthertech'] = { modifiers: [mod('ATKBonus', 0.08)], triggers: [{
-    on: 'VulnerableApplied',
-    apply: ({ event, owner, now }) => {
-      owner.addStacks('AethertechPhysical', 1, { modifiers: [mod('DamageBonus', 0.08, ['Physical'])], duration: 15, maxStacks: 4 }, now);
-      if (event.stacksBefore >= 4) owner.setEffect('AethertechExtra', [mod('DamageBonus', 0.16, ['Physical'])], 10, now, {});
-    } }] };
-
-  sets.Swordmancer = { modifiers: [mod('StaggerEfficiency', 0.20)], triggers: [{
-    on: 'PhysicalStatusApplied', cooldown: 15, // assumption: extra hit is Status-category Physical damage without status scaling
-    apply: ({ event }) => { event.source.hit({ element: 'Physical', category: 'Status', subtype: 'ExtraHit', multiplier: 2.5 }); event.source.dealStagger(10); } }] };
-
-  sets['MI Security'] = { modifiers: [mod('CriticalRate', 0.05)], triggers: [{
-    on: 'CriticalHit', when: ({ event }) => event.scope === 'overall',
-    apply: ({ owner, now }) => {
-      owner.addStacks('MISecurityAttack', 1, { modifiers: [mod('ATKBonus', 0.05)], duration: 5, maxStacks: 5 }, now);
-      if (owner.stackCount('MISecurityAttack', now) >= 5) owner.setEffect('MISecurityCritical', [mod('CriticalRate', 0.05)], 5, now, {});
-    } }] };
-
-  sets.Frontiers = { modifiers: [], triggers: [{ // Combo Skill cooldown reduction is ignored (no combo cooldowns)
-    on: 'SkillSPReturned', apply: ({ simulation }) => simulation.applyToTeam('FrontiersTeam', [mod('DamageBonus', 0.16)], 15) }] };
-
-  sets['AIC Fieldwork'] = { modifiers: [mod('DamageBonus', 0.20), mod('UltimateEfficiency', 0.10)], triggers: [] };
-  // TODO (events not built yet): Bonekrusha, Type 50 Yinglung, Qingbo, Eternal Xiranite, Grizzled Edge, LYNX (defensive)
+  const piece = (name, set, ...modifiers) => ({ name, set, modifiers: modifiers.flat() });
+  gear.byName = (name) => [...gear.armor, ...gear.gloves, ...gear.kits].find((candidate) => candidate.name === name);
+  gear.kits.push(piece('Aethertech Analysis Band', 'Aethertech', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.gloves.push(piece('Aethertech Gloves', 'Aethertech', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('ArtsIntensity', 44.9)));
+  gear.gloves.push(piece('Aethertech Light Gloves', 'Aethertech', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));
+  gear.armor.push(piece('Aethertech Plating', 'Aethertech', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('DamageBonus', 0.269, ['Staggered'])));
+  gear.kits.push(piece('Aethertech Stabilizer', 'Aethertech', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('ArtsIntensity', 53.8)));
+  gear.kits.push(piece('Aethertech Stabilizer T1', 'Aethertech', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.kits.push(piece('Aethertech Watch', 'Aethertech', mod('DEF', 21), mod('STR', 41), mod('AGL', 27), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.armor.push(piece('AIC Fieldwork Armor', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 96), mod('SecondaryAttribute', 63), mod('DamageBonus', 0.121, ['Arts'])));
+  gear.armor.push(piece('AIC Fieldwork Assault Armor', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 96), mod('SecondaryAttribute', 63), mod('ArtsIntensity', 23)));
+  gear.gloves.push(piece('AIC Fieldwork Assault Gloves', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 71), mod('SecondaryAttribute', 48), mod('ArtsIntensity', 38.4)));
+  gear.kits.push(piece('AIC Fieldwork Assault Push Knife', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 35), mod('SecondaryAttribute', 23), mod('ArtsIntensity', 46)));
+  gear.armor.push(piece('AIC Fieldwork CQB Armor', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 96), mod('SecondaryAttribute', 63), mod('DamageBonus', 0.128, ['Physical'])));
+  gear.gloves.push(piece('AIC Fieldwork CQB Gloves', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 71), mod('SecondaryAttribute', 48), mod('DamageBonus', 0.213, ['Physical'])));
+  gear.kits.push(piece('AIC Fieldwork CQB Hacksaw', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 35), mod('SecondaryAttribute', 23), mod('DamageBonus', 0.256, ['Physical'])));
+  gear.kits.push(piece('AIC Fieldwork Ember', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 35), mod('SecondaryAttribute', 23), mod('UltimateEfficiency', 0.274)));
+  gear.kits.push(piece('AIC Fieldwork Flashlight', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 23), mod('SecondaryAttribute', 35), mod('SecondaryAttributeBonus', 0.23)));
+  gear.gloves.push(piece('AIC Fieldwork Gloves', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 71), mod('SecondaryAttribute', 48), mod('DamageBonus', 0.202, ['Arts'])));
+  gear.gloves.push(piece('AIC Fieldwork Hands', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 71), mod('SecondaryAttribute', 48), mod('UltimateEfficiency', 0.228)));
+  gear.kits.push(piece('AIC Fieldwork Machete', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 35), mod('SecondaryAttribute', 23), mod('DamageBonus', 0.242, ['Arts'])));
+  gear.armor.push(piece('AIC Fieldwork Medic Armor', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 96), mod('SecondaryAttribute', 63), mod('TreatmentBonus', 0.115)));
+  gear.gloves.push(piece('AIC Fieldwork Medic Gloves', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 71), mod('SecondaryAttribute', 48), mod('TreatmentBonus', 0.192)));
+  gear.armor.push(piece('AIC Fieldwork Plate', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 96), mod('SecondaryAttribute', 63), mod('UltimateEfficiency', 0.137)));
+  gear.kits.push(piece('AIC Fieldwork Power Bank', 'AIC Fieldwork', mod('DEF', 18), mod('MainAttribute', 35), mod('SecondaryAttribute', 23), mod('TreatmentBonus', 0.23)));
+  gear.armor.push(piece('AIC Fieldwork Vest', 'AIC Fieldwork', mod('DEF', 48), mod('MainAttribute', 63), mod('SecondaryAttribute', 96), mod('SecondaryAttributeBonus', 0.115)));
+  gear.gloves.push(piece('AIC Fieldwork Wraps', 'AIC Fieldwork', mod('DEF', 36), mod('MainAttribute', 48), mod('SecondaryAttribute', 71), mod('SecondaryAttributeBonus', 0.192)));
+  gear.kits.push(piece('Bonekrusha Figurine', 'Bonekrusha', mod('DEF', 21), mod('AGL', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.kits.push(piece('Bonekrusha Figurine T1', 'Bonekrusha', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.kits.push(piece('Bonekrusha Figurine T2', 'Bonekrusha', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.gloves.push(piece('Bonekrusha Gloves', 'Bonekrusha', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));
+  gear.armor.push(piece('Bonekrusha Heavy Armor', 'Bonekrusha', mod('DEF', 56), mod('AGL', 113), mod('INT', 75), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Bonekrusha Heavy Armor T1', 'Bonekrusha', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('DamageBonus', 0.269, ['ComboSkill'])));
+  gear.armor.push(piece('Bonekrusha Heavy Armor T2', 'Bonekrusha', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('DamageBonus', 0.149, ['Electric']), mod('DamageBonus', 0.149, ['Cryo'])));
+  gear.kits.push(piece('Bonekrusha Mask', 'Bonekrusha', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.538, ['Staggered'])));
+  gear.kits.push(piece('Bonekrusha Mask T1', 'Bonekrusha', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('CriticalRate', 0.135)));
+  gear.kits.push(piece('Bonekrusha Mask T2', 'Bonekrusha', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.armor.push(piece('Bonekrusha Poncho', 'Bonekrusha', mod('DEF', 56), mod('STR', 75), mod('WIL', 113), mod('DamageBonus', 0.269, ['ComboSkill'])));
+  gear.armor.push(piece('Bonekrusha Poncho T1', 'Bonekrusha', mod('DEF', 56), mod('AGL', 75), mod('WIL', 113), mod('UltimateEfficiency', 0.16)));
+  gear.gloves.push(piece('Bonekrusha Wristband', 'Bonekrusha', mod('DEF', 42), mod('STR', 84), mod('AGL', 55), mod('DamageBonus', 0.249, ['Heat']), mod('DamageBonus', 0.249, ['Nature'])));
+  gear.gloves.push(piece('Bonekrusha Wristband T1', 'Bonekrusha', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('DamageBonus', 0.249, ['Electric']), mod('DamageBonus', 0.249, ['Cryo'])));
+  gear.armor.push(piece('Deep Rampart Armor', 'Deep Rampart', mod('DEF', 56), mod('AGL', 113), mod('WIL', 75), mod('ArtsIntensity', 26.9)));
+  gear.kits.push(piece('Deep Rampart Comms', 'Deep Rampart', mod('DEF', 21), mod('AGL', 41), mod('WIL', 27), mod('ArtsIntensity', 53.8)));
+  gear.gloves.push(piece('Deep Rampart Gauntlets', 'Deep Rampart', mod('DEF', 42), mod('AGL', 84), mod('WIL', 55), mod('ArtsIntensity', 44.9)));
+  gear.gloves.push(piece('Deepsink Gloves', 'Tide Surge', mod('DEF', 42), mod('INT', 84), mod('WIL', 55), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));
+  gear.armor.push(piece('Eternal Xiranite Armor', 'Eternal Xiranite', mod('DEF', 56), mod('INT', 75), mod('WIL', 113), mod('ArtsIntensity', 26.9)));
+  gear.kits.push(piece('Eternal Xiranite Auxiliary Arm', 'Eternal Xiranite', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('UltimateEfficiency', 0.32)));
+  gear.kits.push(piece('Eternal Xiranite Bracing Slab', 'Eternal Xiranite', mod('DEF', 21), mod('WIL', 53), mod('SecondaryAttributeBonus', 0.269)));
+  gear.kits.push(piece('Eternal Xiranite Bracing Slab T1', 'Eternal Xiranite', mod('DEF', 21), mod('AGL', 27), mod('WIL', 41), mod('UltimateEfficiency', 0.32)));
+  gear.gloves.push(piece('Eternal Xiranite Channeling Gloves', 'Eternal Xiranite', mod('DEF', 42), mod('STR', 55), mod('INT', 84), mod('DamageBonus', 0.449, ['ComboSkill'])));
+  gear.gloves.push(piece('Eternal Xiranite Gloves', 'Eternal Xiranite', mod('DEF', 42), mod('STR', 55), mod('INT', 84), mod('UltimateEfficiency', 0.267)));
+  gear.gloves.push(piece('Eternal Xiranite Gloves T1', 'Eternal Xiranite', mod('DEF', 42), mod('INT', 84), mod('WIL', 55), mod('UltimateEfficiency', 0.267)));
+  gear.gloves.push(piece('Eternal Xiranite Hands', 'Eternal Xiranite', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('UltimateEfficiency', 0.267)));
+  gear.kits.push(piece('Eternal Xiranite Heavy Slab', 'Eternal Xiranite', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('UltimateEfficiency', 0.32)));
+  gear.armor.push(piece('Eternal Xiranite Light Armor', 'Eternal Xiranite', mod('DEF', 56), mod('WIL', 143), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Eternal Xiranite Light Armor T1', 'Eternal Xiranite', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('SecondaryAttributeBonus', 0.135)));
+  gear.armor.push(piece('Eternal Xiranite MOD Armor', 'Eternal Xiranite', mod('DEF', 56), mod('STR', 75), mod('INT', 113), mod('DamageBonus', 0.269, ['ComboSkill'])));
+  gear.armor.push(piece('Eternal Xiranite Overalls', 'Eternal Xiranite', mod('DEF', 56), mod('STR', 75), mod('INT', 113), mod('UltimateEfficiency', 0.16)));
+  gear.kits.push(piece('Eternal Xiranite Power Core', 'Eternal Xiranite', mod('DEF', 21), mod('STR', 27), mod('INT', 41), mod('UltimateEfficiency', 0.32)));
+  gear.kits.push(piece('Eternal Xiranite Power Core T1', 'Eternal Xiranite', mod('DEF', 21), mod('INT', 41), mod('WIL', 27), mod('TreatmentBonus', 0.269)));
+  gear.kits.push(piece('Eternal Xiranite Rangefinder', 'Eternal Xiranite', mod('DEF', 21), mod('STR', 27), mod('INT', 41), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.gloves.push(piece('Eternal Xiranite Wraps', 'Eternal Xiranite', mod('DEF', 42), mod('INT', 55), mod('WIL', 84), mod('UltimateEfficiency', 0.267)));
+  gear.kits.push(piece('Frontiers Analyzer', 'Frontiers', mod('DEF', 21), mod('STR', 53), mod('DamageBonus', 0.673, ['Ultimate'])));
+  gear.armor.push(piece('Frontiers Armor', 'Frontiers', mod('DEF', 56), mod('STR', 113), mod('INT', 75), mod('DamageBonus', 0.336, ['Ultimate'])));
+  gear.armor.push(piece('Frontiers Armor T1', 'Frontiers', mod('DEF', 56), mod('STR', 113), mod('AGL', 75), mod('DamageBonus', 0.269, ['BattleSkill'])));
+  gear.armor.push(piece('Frontiers Armor T2', 'Frontiers', mod('DEF', 56), mod('AGL', 113), mod('INT', 75), mod('DamageBonus', 0.269, ['BattleSkill'])));
+  gear.armor.push(piece('Frontiers Armor T3', 'Frontiers', mod('DEF', 56), mod('AGL', 113), mod('INT', 75), mod('SecondaryAttributeBonus', 0.135)));
+  gear.gloves.push(piece('Frontiers Blight RES Gloves', 'Frontiers', mod('DEF', 42), mod('AGL', 84), mod('INT', 55), mod('DamageBonus', 0.449, ['BattleSkill'])));
+  gear.kits.push(piece('Frontiers Comm', 'Frontiers', mod('DEF', 21), mod('STR', 41), mod('AGL', 27), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.kits.push(piece('Frontiers Comm T1', 'Frontiers', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Electric']), mod('DamageBonus', 0.299, ['Cryo'])));
+  gear.kits.push(piece('Frontiers Extra O2 Tube', 'Frontiers', mod('DEF', 21), mod('AGL', 41), mod('INT', 27), mod('SecondaryAttributeBonus', 0.269)));
+  gear.kits.push(piece('Frontiers Extra O2 Tube T1', 'Frontiers', mod('DEF', 21), mod('AGL', 27), mod('INT', 41), mod('SecondaryAttributeBonus', 0.269)));
+  gear.gloves.push(piece('Frontiers Fiber Gloves', 'Frontiers', mod('DEF', 42), mod('STR', 55), mod('WIL', 84), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));
+  gear.gloves.push(piece('Frontiers Fiber Gloves T1', 'Frontiers', mod('DEF', 42), mod('AGL', 55), mod('INT', 84), mod('UltimateEfficiency', 0.267)));
+  gear.kits.push(piece('Frontiers O2 Tube', 'Frontiers', mod('DEF', 21), mod('WIL', 53), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.armor.push(piece('Frontiers Protection Suit', 'Frontiers', mod('DEF', 56), mod('AGL', 75), mod('INT', 113), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Grizzled Edge Armor', 'Grizzled Edge', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('DamageBonus', 0.149, ['Physical'])));
+  gear.armor.push(piece('Grizzled Edge Armor T1', 'Grizzled Edge', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('ArtsIntensity', 26.9)));
+  gear.gloves.push(piece('Grizzled Edge Gauntlets', 'Grizzled Edge', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('ArtsIntensity', 44.9)));
+  gear.gloves.push(piece('Grizzled Edge Gauntlets T1', 'Grizzled Edge', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('ArtsIntensity', 44.9)));
+  gear.kits.push(piece('Grizzled Edge Push Knife', 'Grizzled Edge', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.kits.push(piece('Grizzled Edge Push Knife T1', 'Grizzled Edge', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.kits.push(piece('Hanging River O2 Tube', 'Tide Surge', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Electric']), mod('DamageBonus', 0.299, ['Cryo'])));
+  gear.armor.push(piece('Hot Work Exo-Rig', 'Hot Work', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('DamageBonus', 0.149, ['Heat']), mod('DamageBonus', 0.149, ['Nature'])));
+  gear.armor.push(piece('Hot Work Exoskeleton', 'Hot Work', mod('DEF', 56), mod('STR', 113), mod('AGL', 75), mod('DamageBonus', 0.149, ['Heat']), mod('DamageBonus', 0.149, ['Nature'])));
+  gear.gloves.push(piece('Hot Work Gauntlets', 'Hot Work', mod('DEF', 42), mod('STR', 55), mod('INT', 84), mod('DamageBonus', 0.249, ['Heat']), mod('DamageBonus', 0.249, ['Nature'])));
+  gear.gloves.push(piece('Hot Work Gauntlets T1', 'Hot Work', mod('DEF', 42), mod('INT', 55), mod('WIL', 84), mod('DamageBonus', 0.249, ['Heat']), mod('DamageBonus', 0.249, ['Nature'])));
+  gear.gloves.push(piece('Hot Work Gloves', 'Hot Work', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('ArtsIntensity', 44.9)));
+  gear.gloves.push(piece('Hot Work Hands PPE', 'Hot Work', mod('DEF', 42), mod('INT', 84), mod('WIL', 55), mod('DamageBonus', 0.249, ['Heat']), mod('DamageBonus', 0.249, ['Nature'])));
+  gear.kits.push(piece('Hot Work Insulation Slab', 'Hot Work', mod('DEF', 21), mod('INT', 41), mod('WIL', 27), mod('DamageBonus', 0.359, ['BattleSkill']), mod('DamageBonus', 0.359, ['ComboSkill']), mod('DamageBonus', 0.359, ['Ultimate'])));
+  gear.kits.push(piece('Hot Work Power Bank', 'Hot Work', mod('DEF', 21), mod('STR', 41), mod('AGL', 27), mod('ArtsIntensity', 53.8)));
+  gear.kits.push(piece('Hot Work Power Cartridge', 'Hot Work', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('ArtsIntensity', 53.8)));
+  gear.kits.push(piece('Hot Work Pyrometer', 'Hot Work', mod('DEF', 21), mod('INT', 53), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.kits.push(piece('LYNX Aegis Injector', 'LYNX', mod('DEF', 32), mod('WIL', 53), mod('TreatmentBonus', 0.269)));
+  gear.kits.push(piece('LYNX Connector', 'LYNX', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('FinalDamageReduction', 0.212)));
+  gear.kits.push(piece('LYNX Connector T1', 'LYNX', mod('DEF', 21), mod('AGL', 27), mod('WIL', 41), mod('HPBonus', 0.538)));
+  gear.kits.push(piece('LYNX Connector T2', 'LYNX', mod('DEF', 21), mod('STR', 53), mod('HPBonus', 0.538)));
+  gear.armor.push(piece('LYNX Cuirass', 'LYNX', mod('DEF', 56), mod('INT', 75), mod('WIL', 113), mod('TreatmentBonus', 0.135)));
+  gear.armor.push(piece('LYNX Cuirass T1', 'LYNX', mod('DEF', 56), mod('AGL', 75), mod('WIL', 113), mod('UltimateEfficiency', 0.16)));
+  gear.gloves.push(piece('LYNX Gauntlets', 'LYNX', mod('DEF', 42), mod('STR', 55), mod('WIL', 84), mod('TreatmentBonus', 0.224)));
+  gear.gloves.push(piece('LYNX Gauntlets T1', 'LYNX', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('UltimateEfficiency', 0.267)));
+  gear.gloves.push(piece('LYNX Gloves', 'LYNX', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('UltimateEfficiency', 0.267)));
+  gear.armor.push(piece('LYNX Heavy Armor', 'LYNX', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('TreatmentBonus', 0.135)));
+  gear.kits.push(piece('LYNX Slab', 'LYNX', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('MainAttributeBonus', 0.269)));
+  gear.kits.push(piece('MI Security Armband', 'MI Security', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Electric']), mod('DamageBonus', 0.299, ['Cryo'])));
+  gear.armor.push(piece('MI Security Armor', 'MI Security', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('ArtsIntensity', 26.9)));
+  gear.armor.push(piece('MI Security Armor T1', 'MI Security', mod('DEF', 56), mod('AGL', 113), mod('INT', 75), mod('UltimateEfficiency', 0.16)));
+  gear.gloves.push(piece('MI Security Gloves', 'MI Security', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('DamageBonus', 0.449, ['BattleSkill'])));
+  gear.gloves.push(piece('MI Security Gloves T1', 'MI Security', mod('DEF', 42), mod('AGL', 84), mod('INT', 55), mod('DamageBonus', 0.561, ['Ultimate'])));
+  gear.gloves.push(piece('MI Security Hands PPE', 'MI Security', mod('DEF', 42), mod('AGL', 55), mod('INT', 84), mod('DamageBonus', 0.299, ['BasicAttack'])));
+  gear.gloves.push(piece('MI Security Hands PPE T1', 'MI Security', mod('DEF', 42), mod('INT', 84), mod('WIL', 55), mod('CriticalRate', 0.112)));
+  gear.armor.push(piece('MI Security Overalls', 'MI Security', mod('DEF', 56), mod('AGL', 75), mod('INT', 113), mod('DamageBonus', 0.179, ['BasicAttack'])));
+  gear.armor.push(piece('MI Security Overalls T1', 'MI Security', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('CriticalRate', 0.067)));
+  gear.armor.push(piece('MI Security Overalls T2', 'MI Security', mod('DEF', 56), mod('AGL', 75), mod('WIL', 113), mod('DamageBonus', 0.269, ['BattleSkill'])));
+  gear.kits.push(piece('MI Security Push Knife', 'MI Security', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('DamageBonus', 0.299, ['Heat']), mod('DamageBonus', 0.299, ['Nature'])));
+  gear.kits.push(piece('MI Security Push Knife T1', 'MI Security', mod('DEF', 21), mod('AGL', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.kits.push(piece('MI Security Scope', 'MI Security', mod('DEF', 21), mod('AGL', 41), mod('INT', 27), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.kits.push(piece('MI Security Scope T1', 'MI Security', mod('DEF', 21), mod('AGL', 41), mod('INT', 27), mod('CriticalRate', 0.135)));
+  gear.kits.push(piece('MI Security Toolkit', 'MI Security', mod('DEF', 21), mod('AGL', 27), mod('INT', 41), mod('CriticalRate', 0.135)));
+  gear.kits.push(piece('Pulser Labs Armor Slab', 'Pulser Labs', mod('DEF', 21), mod('STR', 27), mod('WIL', 41), mod('UltimateEfficiency', 0.32)));
+  gear.kits.push(piece('Pulser Labs Calibrator', 'Pulser Labs', mod('DEF', 21), mod('INT', 53), mod('ArtsIntensity', 53.8)));
+  gear.armor.push(piece('Pulser Labs Disruptor Suit', 'Pulser Labs', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('ArtsIntensity', 26.9)));
+  gear.gloves.push(piece('Pulser Labs Gloves', 'Pulser Labs', mod('DEF', 42), mod('INT', 55), mod('WIL', 84), mod('DamageBonus', 0.249, ['Electric']), mod('DamageBonus', 0.249, ['Cryo'])));
+  gear.kits.push(piece('Pulser Labs Invasion Core', 'Pulser Labs', mod('DEF', 21), mod('INT', 53), mod('DamageBonus', 0.673, ['Ultimate'])));
+  gear.armor.push(piece('Pulser Labs Light Armor', 'Pulser Labs', mod('DEF', 56), mod('STR', 75), mod('WIL', 113), mod('DamageBonus', 0.149, ['Electric']), mod('DamageBonus', 0.149, ['Cryo'])));
+  gear.gloves.push(piece('Pulser Labs Light Gauntlets', 'Pulser Labs', mod('DEF', 42), mod('STR', 55), mod('WIL', 84), mod('DamageBonus', 0.249, ['Electric']), mod('DamageBonus', 0.249, ['Cryo'])));
+  gear.kits.push(piece('Pulser Labs Probe', 'Pulser Labs', mod('DEF', 21), mod('AGL', 27), mod('INT', 41), mod('ArtsIntensity', 53.8)));
+  gear.kits.push(piece('Qingbo Bamboo Cutter', 'Qingbo', mod('DEF', 21), mod('STR', 41), mod('AGL', 27), mod('DamageBonus', 0.359, ['BattleSkill']), mod('DamageBonus', 0.359, ['ComboSkill']), mod('DamageBonus', 0.359, ['Ultimate'])));
+  gear.kits.push(piece('Qingbo Cask', 'Qingbo', mod('DEF', 21), mod('INT', 41), mod('WIL', 27), mod('ArtsIntensity', 53.8)));
+  gear.gloves.push(piece('Qingbo Gauntlets', 'Qingbo', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));
+  gear.gloves.push(piece('Qingbo Gloves', 'Qingbo', mod('DEF', 42), mod('INT', 84), mod('WIL', 55), mod('UltimateEfficiency', 0.267)));
+  gear.armor.push(piece('Qingbo Heavy Armor', 'Qingbo', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Qingbo Light Armor', 'Qingbo', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('ArtsIntensity', 26.9)));
+  gear.kits.push(piece('Qingbo Positioning Kit', 'Qingbo', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.kits.push(piece('Qingbo Positioning Kit T1', 'Grizzled Edge', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.armor.push(piece('Redeemer Armor', '', mod('DEF', 56), mod('INT', 149), mod('UltimateEfficiency', 0.167)));
+  gear.gloves.push(piece('Redeemer Gloves', '', mod('DEF', 42), mod('AGL', 111), mod('DamageBonus', 0.585, ['Ultimate'])));
+  gear.gloves.push(piece('Redeemer Hands', '', mod('DEF', 42), mod('STR', 111), mod('DamageBonus', 0.312, ['BattleSkill']), mod('DamageBonus', 0.312, ['ComboSkill']), mod('DamageBonus', 0.312, ['Ultimate'])));
+  gear.armor.push(piece('Redeemer Plates', '', mod('DEF', 56), mod('AGL', 149), mod('DamageBonus', 0.187, ['BasicAttack'])));
+  gear.kits.push(piece('Redeemer Seal', '', mod('DEF', 21), mod('INT', 55), mod('UltimateEfficiency', 0.334)));
+  gear.kits.push(piece('Redeemer Seal T1', '', mod('DEF', 21), mod('WIL', 55), mod('CriticalRate', 0.14)));
+  gear.kits.push(piece('Redeemer Tag', '', mod('DEF', 21), mod('STR', 55), mod('FinalDamageReduction', 0.219)));
+  gear.kits.push(piece('Redeemer Tag T1', '', mod('DEF', 21), mod('AGL', 55), mod('DamageBonus', 0.562, ['ComboSkill'])));
+  gear.kits.push(piece('Rift Trekker Armor Slab', '', mod('DEF', 21), mod('AGL', 55), mod('SecondaryAttributeBonus', 0.281)));
+  gear.gloves.push(piece('Rift Trekker Gauntlets', '', mod('DEF', 42), mod('STR', 111), mod('DamageBonus', 0.312, ['BasicAttack'])));
+  gear.gloves.push(piece('Rift Trekker Gloves', '', mod('DEF', 42), mod('INT', 111), mod('UltimateEfficiency', 0.279)));
+  gear.gloves.push(piece('Rift Trekker Hands', '', mod('DEF', 42), mod('WIL', 111), mod('DamageBonus', 0.468, ['BattleSkill'])));
+  gear.armor.push(piece('Rift Trekker Heavy Armor', '', mod('DEF', 56), mod('STR', 149), mod('ArtsIntensity', 28.1)));
+  gear.armor.push(piece('Rift Trekker Light Armor', '', mod('DEF', 56), mod('WIL', 149), mod('TreatmentBonus', 0.14)));
+  gear.armor.push(piece('Rift Trekker Overalls', '', mod('DEF', 56), mod('INT', 149), mod('DamageBonus', 0.156, ['Heat']), mod('DamageBonus', 0.156, ['Nature'])));
+  gear.kits.push(piece('Rift Trekker Silver Blade', '', mod('DEF', 21), mod('AGL', 55), mod('UltimateEfficiency', 0.334)));
+  gear.armor.push(piece('Rift Trekker Steel Armor', '', mod('DEF', 56), mod('AGL', 149), mod('DamageBonus', 0.281, ['ComboSkill'])));
+  gear.gloves.push(piece('Rift Trekker Wraps', '', mod('DEF', 42), mod('WIL', 111), mod('DamageBonus', 0.26, ['Electric']), mod('DamageBonus', 0.26, ['Cryo'])));
+  gear.kits.push(piece('Swordmancer Dagger', 'Swordmancer', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.673, ['Ultimate'])));
+  gear.armor.push(piece('Swordmancer Fiber Armor', 'Swordmancer', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('DamageBonus', 0.149, ['Physical'])));
+  gear.kits.push(piece('Swordmancer Flint', 'Swordmancer', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.armor.push(piece('Swordmancer Heavy Armor', 'Swordmancer', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('ArtsIntensity', 26.9)));
+  gear.armor.push(piece('Swordmancer Heavy Armor T1', 'Swordmancer', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('DamageBonus', 0.149, ['Physical'])));
+  gear.armor.push(piece('Swordmancer Light Armor', 'Swordmancer', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('UltimateEfficiency', 0.16)));
+  gear.kits.push(piece('Swordmancer Micro Filter', 'Swordmancer', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.kits.push(piece('Swordmancer NAV Beacon', 'Swordmancer', mod('DEF', 21), mod('STR', 53), mod('ArtsIntensity', 53.8)));
+  gear.gloves.push(piece('Swordmancer TAC Gauntlets', 'Swordmancer', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('DamageBonus', 0.561, ['Ultimate'])));
+  gear.gloves.push(piece('Swordmancer TAC Gauntlets T1', 'Swordmancer', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('ArtsIntensity', 44.9)));
+  gear.gloves.push(piece('Swordmancer TAC Gloves', 'Swordmancer', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('DamageBonus', 0.249, ['Physical'])));
+  gear.armor.push(piece('Tide Fall Light Armor', 'Tide Surge', mod('DEF', 56), mod('STR', 75), mod('INT', 113), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Tide Fall Light Armor T1', 'Tide Surge', mod('DEF', 56), mod('INT', 113), mod('WIL', 75), mod('UltimateEfficiency', 0.16)));
+  gear.gloves.push(piece('Tide Surge Gauntlets', 'Tide Surge', mod('DEF', 42), mod('STR', 84), mod('WIL', 55), mod('DamageBonus', 0.249, ['Electric']), mod('DamageBonus', 0.249, ['Cryo'])));
+  gear.kits.push(piece('Turbid Cutting Torch', 'Tide Surge', mod('DEF', 21), mod('STR', 27), mod('INT', 41), mod('DamageBonus', 0.359, ['BasicAttack'])));
+  gear.kits.push(piece('Turbid Cutting Torch T1', 'Tide Surge', mod('DEF', 21), mod('INT', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Heat']), mod('DamageBonus', 0.299, ['Nature'])));
+  gear.kits.push(piece('Type 50 Yinglung Beacon', 'Type 50 Yinglung', mod('DEF', 21), mod('STR', 27), mod('INT', 41), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.gloves.push(piece('Type 50 Yinglung Gloves', 'Type 50 Yinglung', mod('DEF', 42), mod('AGL', 84), mod('INT', 55), mod('DamageBonus', 0.449, ['ComboSkill'])));
+  gear.gloves.push(piece('Type 50 Yinglung Gloves T1', 'Type 50 Yinglung', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('DamageBonus', 0.449, ['ComboSkill'])));
+  gear.armor.push(piece('Type 50 Yinglung Heavy Armor', 'Type 50 Yinglung', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('DamageBonus', 0.149, ['Physical'])));
+  gear.armor.push(piece('Type 50 Yinglung Heavy Armor T1', 'Type 50 Yinglung', mod('DEF', 56), mod('STR', 75), mod('AGL', 113), mod('UltimateEfficiency', 0.16)));
+  gear.armor.push(piece('Type 50 Yinglung Heavy Armor T2', 'Type 50 Yinglung', mod('DEF', 56), mod('AGL', 113), mod('INT', 75), mod('DamageBonus', 0.269, ['ComboSkill'])));
+  gear.kits.push(piece('Type 50 Yinglung Knife', 'Type 50 Yinglung', mod('DEF', 21), mod('AGL', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.kits.push(piece('Type 50 Yinglung Knife T1', 'Type 50 Yinglung', mod('DEF', 21), mod('STR', 27), mod('INT', 41), mod('DamageBonus', 0.359, ['BattleSkill']), mod('DamageBonus', 0.359, ['ComboSkill']), mod('DamageBonus', 0.359, ['Ultimate'])));
+  gear.armor.push(piece('Type 50 Yinglung Light Armor', 'Type 50 Yinglung', mod('DEF', 56), mod('STR', 75), mod('WIL', 113), mod('DamageBonus', 0.179, ['BattleSkill']), mod('DamageBonus', 0.179, ['ComboSkill']), mod('DamageBonus', 0.179, ['Ultimate'])));
+  gear.kits.push(piece('Type 50 Yinglung Radar', 'Type 50 Yinglung', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Physical'])));
+  gear.kits.push(piece('Type 50 Yinglung Radar T1', 'Type 50 Yinglung', mod('DEF', 21), mod('STR', 27), mod('AGL', 41), mod('DamageBonus', 0.673, ['Ultimate'])));
+  gear.kits.push(piece('Type 50 Yinglung Radar T2', 'Type 50 Yinglung', mod('DEF', 21), mod('AGL', 41), mod('INT', 27), mod('DamageBonus', 0.538, ['ComboSkill'])));
+  gear.armor.push(piece('Type 50 Yinglung Soft Armor', 'Type 50 Yinglung', mod('DEF', 56), mod('STR', 75), mod('INT', 113), mod('DamageBonus', 0.269, ['ComboSkill'])));
+  gear.armor.push(piece('Wave Swell Heavy Armor', 'Tide Surge', mod('DEF', 56), mod('STR', 113), mod('WIL', 75), mod('DamageBonus', 0.149, ['Electric']), mod('DamageBonus', 0.149, ['Cryo'])));
+  gear.kits.push(piece('Xiranflow Baton', 'Xiranflow', mod('DEF', 21), mod('INT', 27), mod('WIL', 41), mod('DamageBonus', 0.538, ['BattleSkill'])));
+  gear.gloves.push(piece('Xiranflow Gloves', 'Xiranflow', mod('DEF', 42), mod('INT', 55), mod('WIL', 84), mod('DamageBonus', 0.249, ['Electric']), mod('DamageBonus', 0.249, ['Cryo'])));
+  gear.armor.push(piece('Xiranflow Light Armor', 'Xiranflow', mod('DEF', 56), mod('INT', 75), mod('WIL', 113), mod('DamageBonus', 0.149, ['Electric']), mod('DamageBonus', 0.149, ['Cryo'])));
 })();
