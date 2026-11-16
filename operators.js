@@ -1,4 +1,4 @@
-// Operators: stats, passives (potential-gated), triggers (talents) and kit (BATK, skills, forms). verified:false until you confirm.
+// Operators: stars (quality) default to 6 when omitted. Stats, passives (potential-gated), triggers (talents) and kit (BATK, skills, forms). verified:false until you confirm.
 // All casts take 1s unless stated. Hits land at the end of their slice. Cooldowns are informational only (combo skills have no cooldown).
 // Skill scripts are generators: `yield ability.wait(s)` advances ability-local time; see sim.js (AbilityContext) for the available calls.
 (function () {
@@ -78,7 +78,7 @@
 
   // =============================== Perlica ===============================
   operators.Perlica = {
-    ultimateEnergyCost: 80, name: 'Perlica', class: 'Caster', element: 'Electric', weaponType: 'Arts Unit', mainAttribute: 'INT', secondaryAttribute: 'WIL', verified: false,
+    stars: 5, ultimateEnergyCost: 80, name: 'Perlica', class: 'Caster', element: 'Electric', weaponType: 'Arts Unit', mainAttribute: 'INT', secondaryAttribute: 'WIL', verified: false,
     baseStats: { HP: 5495, ATK: 303, STR: 91, AGL: 93, INT: 161, WIL: 113 },
     passives: [{ name: 'Keen Mind: INT +60', modifiers: [mod('INT', 60)] }, { name: 'Obliteration Protocol', modifiers: [dmg(0.30, 'Staggered')] }, P(2, mod('UltimateEnergyCost', -0.15))],
     triggers: [{ on: 'ReactionApplied', when: ({ event, owner }) => owner.potential >= 3 && event.name === 'Electrification', // P3
@@ -137,7 +137,7 @@
     passives: [{ name: 'Stalwart: WIL +60', modifiers: [mod('WIL', 60)] }, P(2, mod('WIL', 20), mod('TreatmentBonus', 0.10)), P(4, mod('UltimateEnergyCost', -0.15))],
     triggers: [{ on: 'SkillCast', by: 'any', // talent: Starry Boost of 1st Magnitude (30s after her combo skill, an Electric/Nature battle skill returns 10 SP; ends after triggering)
       when: ({ event, simulation, now }) => event.category === 'BattleSkill' && ['Electric', 'Nature'].includes(event.source.operator.definition.element) && (simulation.flags.starryBoostUntil || 0) > now,
-      apply: ({ event, simulation }) => { simulation.flags.starryBoostUntil = 0; event.source.returnSkillPoints(10); } }],
+      apply: ({ event, simulation }) => { simulation.flags.starryBoostUntil = 0; simulation.endEffectsNamed('Team', 'Starry Boost of 1st Magnitude'); event.source.returnSkillPoints(10); } }],
     kit: {
       basicAttackElement: 'Electric',
       basicAttackSequence: batk([0.42, 0.60, 0.60, 0.81, 1.00], 19),
@@ -167,6 +167,7 @@
           ability.dealStagger(5); ability.gainUltimateEnergy(20);
           ability.grantTreatment([ability.simulation.controlled]);
           ability.simulation.flags.starryBoostUntil = ability.now + 30;
+          ability.simulation.logEffect('Team', 'Starry Boost of 1st Magnitude', { end: ability.now + 30 }); // a team status in game
         },
       },
       ultimate: { *run(ability) {

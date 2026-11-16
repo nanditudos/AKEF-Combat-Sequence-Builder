@@ -54,7 +54,7 @@
       else operator.setEffect(spec.name, scaled, spec.duration, now, {});
     };
     const others = this.operators.filter((operator) => operator !== owner);
-    const teamScoped = ['team', 'others', 'selfAndOthers', 'otherElements', 'classes'].includes(spec.to); // shown once, as a team effect
+    const teamScoped = spec.to === 'team'; // only effects on the whole team are shown as team effects; partial ones show on each recipient
     const previousSuppress = this.suppressOperatorLog;
     if (teamScoped) this.suppressOperatorLog = true;
     switch (spec.to) {

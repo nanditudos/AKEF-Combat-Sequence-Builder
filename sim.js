@@ -50,16 +50,24 @@
       const setTriggers = Object.entries(piecesPerSet).filter(([name, count]) => count >= 3 && setBonuses[name]).flatMap(([name]) => setBonuses[name].triggers || []);
       this.triggers = [...(this.definition.triggers || []), ...((member.weapon && member.weapon.triggers) || []), ...setTriggers].map((trigger) => ({ ...trigger, lastFired: -Infinity }));
       this.form = null; this.formUntil = -Infinity; this.sequenceKey = 'base'; this.comboWindowUntil = -Infinity;
+      this.consumable = member.consumable || null; // food: activates once when the battle starts
+      this.tactical = member.tactical || null; this.tacticalUses = this.tactical ? this.tactical.maxUses : 0;
       const combo = this.definition.kit && this.definition.kit.comboSkill; // combo skill trigger conditions open a 10s window
       for (const windowTrigger of (combo && combo.windowTriggers) || []) this.triggers.push({ on: windowTrigger.on, by: 'any', when: windowTrigger.when, apply: ({ now }) => { this.comboWindowUntil = now + COMBO_WINDOW; }, lastFired: -Infinity });
     }
     inForm(name, now) { return this.form === name && this.formUntil > now; }
     currentForm(now) { return this.form && this.formUntil > now ? ((this.definition.kit.forms || {})[this.form] || {}) : null; }
     activeSequence(now) { const form = this.currentForm(now); return form && form.basicAttackSequence ? { key: this.form, sequence: form.basicAttackSequence } : { key: 'base', sequence: this.definition.kit.basicAttackSequence }; }
+    ultimateEnergyMax(now) { this.sheet.currentTime = now; return this.sheet.ultimateEnergyCost(this.definition.ultimateEnergyCost || 0); } // the pool equals the (modified) ultimate cost
+    addUltimateEnergyDirect(amount, now, ignoreBlock = false) { // no efficiency; overflow is lost
+      if (amount > 0 && !ignoreBlock && (this.flags.blockUltimateEnergyUntil || 0) > now) return;
+      const max = this.ultimateEnergyMax(now);
+      this.ultimateEnergy = max > 0 && amount > 0 ? Math.max(this.ultimateEnergy, Math.min(max, this.ultimateEnergy + amount)) : this.ultimateEnergy + amount;
+    }
     receiveUltimateEnergy(amount, now) { // blocked while e.g. a form forbids gaining UE; efficiency scales gains
       this.sheet.currentTime = now;
-      if (amount > 0 && (this.flags.blockUltimateEnergyUntil || 0) > now) return;
-      this.ultimateEnergy += amount * (1 + this.sheet.sum('UltimateEfficiency'));
+      this.addUltimateEnergyDirect(amount * (1 + this.sheet.sum('UltimateEfficiency')), now);
+      if (this.simulation) this.simulation.checkTacticals();
     }
     // Stackable effect: every stack has its own timer; at the cap the oldest stack is replaced.
     addStacks(name, count, { modifiers, duration, maxStacks }, now) {
@@ -134,6 +142,7 @@
       const cost = this.operator.sheet.ultimateEnergyCost(baseCost);
       if (this.operator.ultimateEnergy < cost - 1e-9) this.simulation.warn(`${this.operator.name}: ultimate cast with ${this.operator.ultimateEnergy.toFixed(1)}/${cost.toFixed(1)} UE`);
       this.operator.ultimateEnergy -= cost;
+      this.simulation.checkTacticals();
     }
     enterForm(name, duration) { this.simulation.logEffect(this.operator.name, 'Form: ' + name, { end: this.now + duration }); Object.assign(this.operator, { form: name, formUntil: this.now + duration, basicAttackIndex: 0 }); }
     setLabel(text) { if (this.record) this.record.label = text; } // action name shown in the sequence
@@ -205,6 +214,31 @@
     logInstant(target, name, detail = '') { const record = this.logEffect(target, name, { detail, stack: true }); this.endEffect(record); return record; }
     endEffect(record, time = this.now) { if (record && record.end > time) { record.end = time; record.endOrder = ++this.orderCounter; record.endEntry = this.currentEntryIndex; } }
     endEffectsNamed(target, name) { for (const record of this.effectTimeline) if (record.target === target && record.name === name && record.end > this.now) this.endEffect(record); }
+    // Tacticals trigger automatically at ANY moment their condition holds (UE below the threshold) while uses remain, or manually via the Tactical action.
+    // Assumptions: the gain is a fraction of the recipient's max UE, is not scaled by Ultimate Efficiency, and ignores "cannot gain UE" form blocks.
+    useTactical(operator, manual = false) {
+      const tactical = operator.tactical;
+      if (!tactical || operator.tacticalUses <= 0) return false;
+      operator.tacticalUses--;
+      for (const target of tactical.targets === 'team' ? this.operators : [operator]) target.addUltimateEnergyDirect(tactical.gainFraction * target.ultimateEnergyMax(this.now), this.now, true);
+      this.logInstant(operator.name, 'Tactical: ' + tactical.name, manual ? 'manual' : 'auto');
+      return true;
+    }
+    checkTacticals() {
+      if (this.checkingTacticals) return;
+      this.checkingTacticals = true;
+      try {
+        let triggered = true;
+        while (triggered) {
+          triggered = false;
+          for (const operator of this.operators) {
+            if (!operator.tactical || operator.tacticalUses <= 0) continue;
+            const max = operator.ultimateEnergyMax(this.now);
+            if (max > 0 && operator.ultimateEnergy < operator.tactical.threshold * max - 1e-9) { this.useTactical(operator); triggered = true; }
+          }
+        }
+      } finally { this.checkingTacticals = false; }
+    }
     contextFor(operator, category) { const ability = new AbilityContext(this, operator); ability.category = category; return ability; }
     warn(text) { this.warnings.push({ time: this.now, text }); }
     schedule(time, callback) {
@@ -227,10 +261,12 @@
     // actionList: [{ operator: index, action: 'BasicAttack'|'BattleSkill'|'ComboSkill'|'Ultimate'|'Finisher'|'DiveAttack'|'Switch'|'Custom', extraDelay? }]
     run(actionList) {
       let previousStart = 0;
+      for (const operator of this.operators) if (operator.consumable) operator.setEffect(operator.consumable.name, operator.consumable.modifiers, operator.consumable.duration, 0, {});
       for (const operator of this.operators) this.emit('BattleStart', { source: { operator } });
+      this.checkTacticals();
       actionList.forEach((entry, index) => {
         const operator = this.operators[entry.operator];
-        let start = Math.max(operator.lockEnd, previousStart) + (entry.extraDelay || 0);
+        let start = entry.action === 'Tactical' ? previousStart + (entry.extraDelay || 0) : Math.max(operator.lockEnd, previousStart) + (entry.extraDelay || 0); // tacticals take no time and ignore locks
         if (entry.action === 'Switch') start = Math.max(start, operator.switchedAwayAt + SWITCH_BACK_LOCK);
         this.runUntil(start);
         const record = { index, operator: operator.name, action: entry.action, start };
@@ -241,7 +277,7 @@
         this.currentEntryIndex = index;
         this.perform(entry, operator, start, index);
         this.currentEntryIndex = undefined;
-        record.end = Math.max(start, operator.lockEnd); record.controlled = this.controlled.name; record.afterOrder = this.orderCounter;
+        record.end = entry.action === 'Tactical' ? start : Math.max(start, operator.lockEnd); record.controlled = this.controlled.name; record.afterOrder = this.orderCounter;
       });
       this.horizon = Math.max(0, ...this.operators.map((operator) => operator.lockEnd));
       this.runUntil(this.horizon);
@@ -263,6 +299,7 @@
         case 'BattleSkill': return kit.battleSkill ? null : 'operator has no battle skill';
         case 'ComboSkill': return kit.comboSkill ? null : 'operator has no combo skill';
         case 'Ultimate': return kit.ultimate ? null : 'operator has no ultimate';
+        case 'Tactical': return !operator.tactical ? 'no tactical equipped' : operator.tacticalUses > 0 ? null : 'no tactical uses left';
         default: return null;
       }
     }
@@ -316,6 +353,8 @@
             ability.dealStagger(attack.stagger * (1 + finalStrike.staggerBonus));
           }
         })(), ability);
+      } else if (entry.action === 'Tactical') {
+        this.useTactical(operator, true); ability.setLabel('Tactical: ' + operator.tactical.name);
       } else if (entry.action === 'Custom') { // scenario/test scripts: { script: function* (ability) {...}, lock?: seconds, category? }
         ability.lockFor(entry.lock || 0);
         if (['BattleSkill', 'ComboSkill', 'Ultimate'].includes(ability.category)) this.emit('SkillCast', { source: ability, category: ability.category });

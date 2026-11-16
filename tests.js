@@ -389,6 +389,36 @@
   check('builder: Force of Nature stays listed on the last row', view.rows[5].effects[0].some((e) => e.name === 'ForceOfNature' && !e.ended) ? 1 : 0, 1);
   check('builder: BATK labels (BATK 1 ... BATK 3)', same(view.rows[1].label + '|' + view.rows[3].label, 'BATK 1|BATK 3'), 1);
 
+  // Consumables, tacticals, UE pool, quality, team-effect scope
+  check('consumables: 36 loaded; Ginseng Meat Stew = ATK +180, Crit Rate +11.44%', Object.keys(d.consumables).length * 100 + d.consumables.GinsengMeatStew.modifiers.length, 3602);
+  r = crew([me('ZhuangFangyi', { consumable: d.consumables.JakubsLegacy })]);
+  r.run([step(0, 'BasicAttack'), step(0, 'BasicAttack', { extraDelay: 300 })]);
+  check('consumable: ATK +27% from the battle start, gone after 300s', ((x, t1, t2) => { x.operators[0].sheet.currentTime = t1; const a = x.operators[0].sheet.sum('ATKBonus'); x.operators[0].sheet.currentTime = t2; return a * 100 + x.operators[0].sheet.sum('ATKBonus'); })(r, 1, 301), 27);
+  r = crew([me('ZhuangFangyi', { tactical: d.tacticals.StewMeeting })]); r.run([]);
+  check('tactical: triggers anytime UE < 50% (0 -> 144 UE, 3 of 4 uses)', r.operators[0].ultimateEnergy * 10 + r.operators[0].tacticalUses, 1441);
+  r = crew([me('ZhuangFangyi', { tactical: d.tacticals.MiniHoneySlugpudding }), me('Perlica')]); r.run([]);
+  check('tactical: team tactical gives every operator 8% of its own max UE per use (4 uses)', Math.round(r.operators[0].ultimateEnergy * 10) * 1000 + Math.round(r.operators[1].ultimateEnergy * 10), 768256);
+  r = crew([me('ZhuangFangyi', { tactical: d.tacticals.HerbalTisane, startUltimateEnergy: 240 })]);
+  r.run([step(0, 'Tactical'), step(0, 'Tactical'), step(0, 'Tactical'), step(0, 'Tactical')]);
+  check('tactical: manual use takes no time/lock; 3 uses, the 4th is invalid', r.timeline[2].end * 100 + (r.timeline[3].invalid ? 1 : 0) + r.operators[0].tacticalUses * 10, 1);
+  r = crew([me('ZhuangFangyi', { startUltimateEnergy: 235 })]);
+  r.run([script(0, function* (a) { a.gainUltimateEnergy(20); })]);
+  check('UE: overflow above the pool (240) is lost', r.operators[0].ultimateEnergy, 240);
+  r = crew([me('ZhuangFangyi', { startUltimateEnergy: 240, tactical: d.tacticals.StewMeeting })]);
+  r.run([step(0, 'Ultimate')]);
+  check('tactical: triggers after the ultimate drains UE (even in the form that blocks UE gain)', Math.round(r.operators[0].ultimateEnergy), 144);
+  r = crew([me('Liino'), me('Perlica')]);
+  r.run([step(0, 'BattleSkill'), script(1, function* (a) { a.applyReaction('Electric', 1); }, { extraDelay: 1.5 }), step(0, 'ComboSkill'), step(1, 'BattleSkill')]);
+  const starry = r.effectTimeline.find((e) => e.name === 'Starry Boost of 1st Magnitude');
+  check('Liino: Starry Boost is a Team status, ends when a Battle Skill triggers it', starry && starry.target === 'Team' && starry.end < 31 ? 1 : 0, 1);
+  state = B.defaultState(); state.team[0] = B.newSlot('Perlica', '', []); state.team[1] = B.newSlot('Gilberta', '', []); state.actions = [{ slot: 1, action: 'BattleSkill', extraDelay: 0 }];
+  view = B.simulate(state);
+  check("builder: partial-team effects (Messenger's Song) show on each recipient, not in the Team column", view.rows[0].effects[0].some((e) => e.name === 'MessengersSong') && view.rows[0].effects[1].some((e) => e.name === 'MessengersSong') && !view.rows[0].effects[4].some((e) => e.name === 'MessengersSong') ? 1 : 0, 1);
+  check('builder: UE end shows the pool (240) and stagger end is reported', view.finalUE.find(([i]) => i === 1)[2] * 1000 + (view.finalStagger.capacity > 0 ? 1 : 0), 90001);
+  check('quality: Perlica is 5 stars, default 6', (O.Perlica.stars || 6) * 10 + (O.Arcane.stars || 6), 56);
+  state = B.defaultState(); state.team[0].consumable = 'JakubsLegacy'; state.team[0].tactical = 'StewMeeting';
+  check('builder: shown ATK includes the consumable', B.slotStats(state.team[0]).ATK / B.slotStats(B.defaultState().team[0]).ATK > 1.1 ? 1 : 0, 1);
+
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,
     gearPieces: [d.gear.byName('Xiranflow Light Armor'), d.gear.byName('Xiranflow Gloves'), d.gear.byName('Xiranflow Baton'), d.gear.byName('LYNX Slab')], setBonuses: d.gear.setBonuses });

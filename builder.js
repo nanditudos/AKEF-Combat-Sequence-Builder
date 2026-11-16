@@ -2,13 +2,13 @@
 (function () {
   const E = globalThis.Endfield, D = E.data;
   const SLOT_KEYS = ['armor', 'gloves', 'kit1', 'kit2'];
-  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch']];
+  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch'], ['Tactical', 'Tact.']];
   const COLUMNS = 6; // 4 operators, Team (+ battlefield), Enemy
 
   const newSlot = (op = '', weapon = '', gear = []) => ({
-    op, potential: 0, weapon, tactical: '', ue: 'empty',
+    op, potential: 0, weapon, consumable: '', tactical: '', ue: 'empty',
     gear: { armor: gear[0] || '', gloves: gear[1] || '', kit1: gear[2] || '', kit2: gear[3] || '' },
-    locks: { armor: false, gloves: false, kit1: false, kit2: false, weapon: false, tactical: false, set: false },
+    locks: { armor: false, gloves: false, kit1: false, kit2: false, weapon: false, consumable: false, set: false },
   });
   const defaultState = () => ({
     team: [newSlot('ZhuangFangyi', 'LoneBarge', ['Xiranflow Light Armor', 'Xiranflow Gloves', 'Xiranflow Baton', 'LYNX Slab']), newSlot(), newSlot(), newSlot()],
@@ -22,11 +22,13 @@
     const gearPieces = SLOT_KEYS.map((key) => slot.gear[key]).filter(Boolean).map((name) => D.gear.byName(name)).filter(Boolean);
     const weapon = D.weapons[slot.weapon];
     const sheet = E.buildStatSheet({ operator, potential: slot.potential, weapon, gearPieces, setBonuses: D.gear.setBonuses });
+    const consumable = D.consumables && D.consumables[slot.consumable], tactical = D.tacticals && D.tacticals[slot.tactical];
+    if (consumable) sheet.addModifiers(consumable.modifiers, 'effect:' + consumable.name); // shown stats include the active consumable
     const strength = sheet.attribute('STR');
     const perSet = {};
     for (const piece of gearPieces) if (piece.set) perSet[piece.set] = (perSet[piece.set] || 0) + 1;
     const activeSets = Object.keys(perSet).filter((name) => perSet[name] >= 3);
-    return { operator, weapon, gearPieces, sheet, activeSets, ATK: sheet.attack(), STR: strength, AGL: sheet.attribute('AGL'), INT: sheet.attribute('INT'), WIL: sheet.attribute('WIL'),
+    return { operator, weapon, gearPieces, sheet, activeSets, consumable, tactical, ATK: sheet.attack(), STR: strength, AGL: sheet.attribute('AGL'), INT: sheet.attribute('INT'), WIL: sheet.attribute('WIL'),
       HP: (operator.baseStats.HP + sheet.sum('HP') + 5 * strength) * (1 + sheet.sum('HPBonus')) };
   }
 
@@ -40,7 +42,7 @@
       const toSim = new Map(filled.map((slotIndex, simIndex) => [slotIndex, simIndex]));
       const members = filled.map((slotIndex) => {
         const slot = state.team[slotIndex], st = stats[slotIndex];
-        return { operator: st.operator, potential: slot.potential, weapon: st.weapon, gearPieces: st.gearPieces,
+        return { operator: st.operator, potential: slot.potential, weapon: st.weapon, gearPieces: st.gearPieces, consumable: st.consumable, tactical: st.tactical,
           startUltimateEnergy: slot.ue === 'full' ? st.sheet.ultimateEnergyCost(st.operator.ultimateEnergyCost || 0) : 0 };
       });
       const sim = new E.Simulation({ team: members, enemy, setBonuses: D.gear.setBonuses, criticalMode: state.crit, startingSP: state.startSP,
@@ -85,7 +87,8 @@
           if (effect.detail) item.detail = effect.detail;
         }
       }
-      Object.assign(view, { sim, result, rows, initialControlled: filled[0], finalUE: filled.map((slotIndex, simIndex) => [slotIndex, sim.operators[simIndex].ultimateEnergy]) });
+      Object.assign(view, { sim, result, rows, initialControlled: filled[0], finalUE: filled.map((slotIndex, simIndex) => { const op = sim.operators[simIndex]; return [slotIndex, op.ultimateEnergy, op.ultimateEnergyMax(result.horizon), op.tactical ? op.tacticalUses : null]; }),
+        finalStagger: { value: sim.enemy.stagger, capacity: enemy.staggerCapacity, staggered: sim.enemy.isStaggered(result.horizon) } });
     } catch (error) { view.error = error; }
     return view;
   }
