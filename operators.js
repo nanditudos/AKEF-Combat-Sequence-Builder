@@ -70,7 +70,8 @@
           ability.enterForm('Empyrean', 25);
           ability.operator.flags.freeBattleSkill = true;
           ability.operator.flags.blockUltimateEnergyUntil = ability.now + 25;
-          if (ability.potential >= 5) ability.applyEffect('EmpyreanResistance', [mod('IgnoreResistance', 15, ['Electric'])], 25, {});
+          ability.operator.sheet.removeModifiersFrom('form:Empyrean'); // P5: part of the form itself, not a separate buff
+          if (ability.potential >= 5) ability.operator.sheet.addModifiers([{ ...mod('IgnoreResistance', 15, ['Electric']), expires: ability.now + 25 }], 'form:Empyrean');
         },
       },
     },

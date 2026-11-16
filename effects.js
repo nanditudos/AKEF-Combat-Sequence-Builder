@@ -13,7 +13,7 @@
     group.modifiers = modifiers; group.stacks = group.stacks.filter((stack) => stack.expires > now);
     for (let i = 0; i < count; i++) {
       if (group.stacks.length >= maxStacks) { const removed = group.stacks.shift(); if (this.simulation) this.simulation.endEffect(removed.record); }
-      const record = this.simulation && !this.simulation.suppressOperatorLog ? this.simulation.logEffect(this.name, name, { detail: 'armed', end: now + duration, stack: true }) : null;
+      const record = this.simulation && !this.simulation.suppressOperatorLog ? this.simulation.logEffect(this.name, name, { detail: 'armed', end: now + duration, stack: true, icon: E.iconForModifiers(modifiers) }) : null;
       group.stacks.push({ expires: now + duration, record });
     }
   };
@@ -69,7 +69,7 @@
     }
     this.suppressOperatorLog = previousSuppress;
     if (teamScoped) {
-      for (let i = 0; i < (spec.maxStacks ? count : 1); i++) this.logEffect('Team', spec.name, { detail: spec.to === 'team' ? '' : spec.to, end: now + spec.duration, stack: Boolean(spec.maxStacks) });
+      for (let i = 0; i < (spec.maxStacks ? count : 1); i++) this.logEffect('Team', spec.name, { icon: E.iconForModifiers(modifiers), detail: spec.to === 'team' ? '' : spec.to, end: now + spec.duration, stack: Boolean(spec.maxStacks) });
       if (spec.maxStacks) {
         const live = this.effectTimeline.filter((r) => r.target === 'Team' && r.name === spec.name && r.end > now);
         while (live.length > spec.maxStacks) this.endEffect(live.shift());

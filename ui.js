@@ -48,15 +48,23 @@
   // ---------- effect icons ----------
   const hue = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const iconEl = (effect) => {
-    const custom = (E.icons || {})[effect.name];
-    const title = effect.name + (effect.detail ? ' (' + effect.detail + ')' : '') + (effect.count > 1 ? ' ×' + effect.count : '') + (effect.ended ? ' — ends / consumed on this row' : '');
+    const custom = (E.icons || {})[effect.name], customIsImage = custom && /[\/.]/.test(custom);
+    const badge = effect.level ? E.roman(effect.level) : effect.count > 1 ? E.roman(effect.count) : ''; // levels and stack counts as Roman numerals
+    const title = effect.name + (effect.detail ? ' (' + effect.detail + ')' : '') + (badge ? ' ' + badge : '') + (effect.ended ? ' — ends / consumed on this row' : '');
     const box = el('span', { class: 'icon' + (effect.ended ? ' ended' : ''), title });
+    const glyph = el('span', { class: 'glyph' }, (!customIsImage && custom) || effect.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2));
     box.style.background = `hsl(${hue(effect.name)} 45% 32%)`;
-    if (custom && /[\/.]/.test(custom)) box.append(el('img', { src: custom, alt: effect.name }));
-    else box.textContent = custom || effect.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2);
-    if (effect.count > 1) box.append(el('i', { class: 'n' }, String(effect.count)));
+    box.append(glyph);
+    if (badge) box.append(el('i', { class: 'n' }, badge));
+    const source = customIsImage ? custom : effect.icon ? E.ICON_PATH + effect.icon + '.webp' : null;
+    if (source) { // the picture keeps its aspect ratio; if the file is missing the coloured square with initials simply stays
+      const image = new Image(); image.alt = '';
+      image.onload = () => { glyph.replaceChildren(image); box.style.background = 'transparent'; box.classList.add('has-image'); };
+      image.src = source;
+    }
     return box;
   };
+  const statIcon = (key) => { const image = el('img', { class: 'stat-icon', alt: '' }); image.addEventListener('error', () => image.remove()); image.src = E.ICON_PATH + key + '.webp'; return image; };
 
   // ---------- settings ----------
   const gearOptions = (list) => [['', '—'], ...list.map((piece) => [piece.name, piece.name + (piece.set ? ' · ' + piece.set : '')])];
@@ -88,13 +96,13 @@
   }
   const teamSettings = () => el('div', { class: 'cell team-col' },
     field('SP', numberInput(state.startSP, (v) => update(() => { state.startSP = v; }), { min: 0, max: 300 })),
-    el('div', { class: 'field' }, el('label', {}, 'Crit'), ['mean', 'median'].map((mode) => el('label', { class: 'radio', title: CRIT_HELP[mode] },
+    el('div', { class: 'field wrap' }, el('label', {}, 'Crit'), ['mean', 'median'].map((mode) => el('label', { class: 'radio', title: CRIT_HELP[mode] },
       el('input', { type: 'radio', name: 'critMode', checked: state.crit === mode, onchange: () => update(() => { state.crit = mode; }) }), mode))));
   const enemySettings = () => {
     const enemy = D.enemies[state.enemy], cell = el('div', { class: 'cell enemy-col' });
     cell.append(select(Object.entries(D.enemies).map(([key, item]) => [key, item.name]), state.enemy, (v) => update(() => { state.enemy = v; }), { class: 'opselect' }));
     if (enemy) cell.append(el('div', {}, `${enemy.tier} · Lv ${enemy.level}`), el('div', {}, `HP ${fmt(enemy.hp)} · DEF ${enemy.defense}`),
-      ...Object.entries(enemy.resistance).map(([name, value]) => el('div', { class: 'dim' }, `${name} ${(value / 100).toFixed(1)}`))); // shown as the wiki does: resistance / 100
+      ...Object.entries(enemy.resistance).map(([name, value]) => el('div', { class: 'dim' }, `${name} ${(1 - value / 100).toFixed(1)}`))); // shown as the wiki does: 1 - resistance / 100 // shown as the wiki does: resistance / 100
     cell.append(field('Stag.', numberInput(state.initialStagger, (v) => update(() => { state.initialStagger = v; }), { min: 0, title: 'Initial stagger meter' })));
     return cell;
   };
@@ -104,7 +112,7 @@
     const stats = view.stats[index], cell = el('div', { class: 'cell' });
     if (!stats) return cell;
     const main = stats.operator.mainAttribute;
-    for (const key of ['HP', 'ATK', 'STR', 'AGL', 'INT', 'WIL']) cell.append(el('div', { class: 'stat' + (key === main ? ' main' : '') }, el('span', {}, key + ' '), el('b', {}, fmt(stats[key]))));
+    for (const key of ['HP', 'ATK', 'STR', 'AGL', 'INT', 'WIL']) cell.append(el('div', { class: 'stat' + (key === main ? ' main' : '') }, el('span', {}, statIcon(key), key + ' '), el('b', {}, fmt(stats[key]))));
     const ue = (view.finalUE || []).find(([slotIndex]) => slotIndex === index);
     if (ue) {
       cell.append(el('div', { class: 'dim' }, `UE end ${ue[1].toFixed(1)}/${ue[2].toFixed(1)}`));
@@ -177,10 +185,10 @@
     return box;
   }
   // ---------- optimizer panel ----------
-  const opt = { config: { population: 60, generations: 80, seed: 1, allowWarnings: true }, running: false, stop: false, progress: null, results: null, error: null };
+  const opt = { config: { population: 60, generations: 80, seed: 1, allowWarnings: true }, running: false, stop: false, progress: null, results: null, error: null, open: {} };
   const refreshSidebar = () => { const old = document.querySelector('aside'); if (old) old.replaceWith(sidebar()); };
   async function runOptimizer() {
-    Object.assign(opt, { running: true, stop: false, results: null, error: null, progress: null });
+    Object.assign(opt, { running: true, stop: false, results: null, error: null, progress: null, open: {} });
     refreshSidebar();
     try {
       const problem = E.optimizer.createProblem(state, opt.config);
@@ -199,7 +207,7 @@
     appendAll(box, el('div', {}, 'Current ', el('b', {}, fmt(r.baseline.damage)), r.baseline.warnings ? el('span', { class: 'bad' }, ` (${r.baseline.warnings} warnings)`) : null),
       el('div', { class: 'dim' }, `${r.evaluations} sims in ${r.seconds.toFixed(1)}s${r.stopped ? ' (stopped)' : ''}`),
       !r.feasible && !opt.config.allowWarnings ? el('div', { class: 'bad' }, 'No warning-free build exists; showing the fewest warnings.') : null);
-    r.builds.slice(0, 6).forEach((build, i) => box.append(el('details', { open: i === 0 },
+    r.builds.slice(0, 6).forEach((build, i) => box.append(el('details', { open: opt.open[i] !== undefined ? opt.open[i] : i === 0, ontoggle: (e) => { opt.open[i] = e.target.open; } }, // remembers which results are open across re-renders
       el('summary', {}, `#${i + 1} `, el('b', {}, fmt(build.damage)), el('span', { class: build.gain >= 0 ? 'good' : 'bad' }, ` ${build.gain >= 0 ? '+' : ''}${(build.gain * 100).toFixed(1)}%`), build.warnings ? el('span', { class: 'bad' }, ` ${build.warnings}⚠`) : null),
       buildLines(build.genome), el('button', { onclick: () => { E.optimizer.applyBuild(state, build.genome); render(); } }, 'Apply'))));
     return box;

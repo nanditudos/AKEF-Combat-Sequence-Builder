@@ -98,7 +98,9 @@
           if (!alive && effect.endEntry !== simIndex) continue;
           const list = row.effects[column];
           let item = list.find((candidate) => candidate.name === effect.name);
-          if (!item) { item = { name: effect.name, count: 0, ended: true, detail: effect.detail }; list.push(item); }
+          if (!item) { item = { name: effect.name, count: 0, ended: true, detail: effect.detail, icon: effect.icon, level: 0 }; list.push(item); }
+          if (effect.level) item.level = Math.max(item.level, effect.level);
+          if (!item.icon) item.icon = effect.icon;
           item.count++;
           if (alive) item.ended = false;
           if (effect.detail) item.detail = effect.detail;

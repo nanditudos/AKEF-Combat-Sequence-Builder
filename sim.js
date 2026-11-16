@@ -30,7 +30,7 @@
     addStagger(amount, time) {
       if (this.isStaggered(time)) return;
       this.stagger += amount;
-      if (this.stagger >= this.data.staggerCapacity) { this.stagger = 0; this.staggeredUntil = time + this.data.staggeredRecovery; this.finisherUsed = false; if (this.simulation) this.simulation.logEffect('Enemy', 'Staggered', { end: this.staggeredUntil }); }
+      if (this.stagger >= this.data.staggerCapacity) { this.stagger = 0; this.staggeredUntil = time + this.data.staggeredRecovery; this.finisherUsed = false; if (this.simulation) this.simulation.logEffect('Enemy', 'Staggered', { end: this.staggeredUntil, icon: 'Staggered' }); }
     }
     forDamage(time) {
       return { tier: this.data.tier, defense: this.data.defense, resistance: this.data.resistance, staggered: this.isStaggered(time), resistanceShred: this.status.resistanceShred(time), modifiers: this.status.modifiers(time), tags: this.status.tags(time) };
@@ -78,7 +78,7 @@
       for (let i = 0; i < count; i++) {
         if (stacks.length >= maxStacks) { const removed = stacks.shift(); this.sheet.removeModifiersFrom(removed.source); if (this.simulation) this.simulation.endEffect(removed.record); }
         const source = `stack:${name}:${this.stackCounter++}`;
-        const record = this.simulation && !this.simulation.suppressOperatorLog ? this.simulation.logEffect(this.name, name, { end: now + duration, stack: true }) : null;
+        const record = this.simulation && !this.simulation.suppressOperatorLog ? this.simulation.logEffect(this.name, name, { end: now + duration, stack: true, icon: E.iconForModifiers(modifiers) }) : null;
         stacks.push({ expires: now + duration, source, record });
         this.sheet.addModifiers(modifiers.map((m) => ({ ...m, expires: now + duration })), source);
       }
@@ -86,7 +86,7 @@
     stackCount(name, now) { return (this.stacks[name] || []).filter((stack) => stack.expires > now).length; }
     // Same-named effect: replaced and refreshed. `state` carries values such as stack amounts.
     setEffect(name, modifiers, duration, now, state) {
-      if (this.simulation && !this.simulation.suppressOperatorLog) this.simulation.logEffect(this.name, name, { end: now + duration });
+      if (this.simulation && !this.simulation.suppressOperatorLog) this.simulation.logEffect(this.name, name, { end: now + duration, icon: E.iconForModifiers(modifiers) });
       this.sheet.removeModifiersFrom('effect:' + name);
       this.sheet.addModifiers(modifiers.map((m) => ({ ...m, expires: now + duration })), 'effect:' + name);
       this.effects[name] = { state, expires: now + duration };
@@ -126,13 +126,13 @@
     }
     applySusceptibility(element, value, duration) { // element: 'Physical' | 'Arts' | 'Heat' ...
       this.enemy.status.setEffect('Susceptibility:' + element, [{ stat: 'Susceptibility', value, tags: [element] }], duration, this.now);
-      this.simulation.logEffect('Enemy', element + ' Susceptibility', { end: this.now + duration });
+      this.simulation.logEffect('Enemy', element + ' Susceptibility', { end: this.now + duration, icon: E.susceptibilityIcon(element) });
       this.simulation.emit('SusceptibilityApplied', { source: this, element });
     }
     // Event-only statuses (no mechanics yet): OriginiumCrystalsApplied, ImmobilizationApplied, WeaknessApplied, LinkGranted, AmpGranted
     applyDynamicSusceptibility(element, duration, valueAt) { // value re-evaluated at every hit while active
       this.enemy.status.setDynamicEffect('Susceptibility:' + element, duration, (time) => [{ stat: 'Susceptibility', value: valueAt(time), tags: [element] }]);
-      this.simulation.logEffect('Enemy', element + ' Susceptibility', { end: this.now + duration });
+      this.simulation.logEffect('Enemy', element + ' Susceptibility', { end: this.now + duration, icon: E.susceptibilityIcon(element) });
       this.simulation.emit('SusceptibilityApplied', { source: this, element });
     }
     announce(type, details = {}) { this.simulation.emit(type, { source: this, ...details }); }
@@ -201,16 +201,16 @@
       return result.damage;
     }
     // Effect timeline for the UI. target: operator name | 'Team' | 'Enemy'. Same-named non-stack effects refresh instead of duplicating.
-    logEffect(target, name, { detail = '', end = Infinity, stack = false } = {}) {
+    logEffect(target, name, { detail = '', end = Infinity, stack = false, icon, level } = {}) {
       if (!stack) {
         const open = this.effectTimeline.find((r) => r.target === target && r.name === name && !r.stack && r.end > this.now);
-        if (open) { open.end = end; open.detail = detail || open.detail; return open; }
+        if (open) { open.end = end; open.detail = detail || open.detail; if (level) open.level = level; return open; }
       }
-      const record = { target, name, detail, stack, start: this.now, end, entry: this.currentEntryIndex, order: ++this.orderCounter, endOrder: Infinity, endEntry: undefined };
+      const record = { target, name, detail, stack, icon, level, start: this.now, end, entry: this.currentEntryIndex, order: ++this.orderCounter, endOrder: Infinity, endEntry: undefined };
       this.effectTimeline.push(record);
       return record;
     }
-    logInstant(target, name, detail = '') { const record = this.logEffect(target, name, { detail, stack: true }); this.endEffect(record); return record; }
+    logInstant(target, name, detail = '', icon, level) { const record = this.logEffect(target, name, { detail, stack: true, icon, level }); this.endEffect(record); return record; }
     endEffect(record, time = this.now) { if (record && record.end > time) { record.end = time; record.endOrder = ++this.orderCounter; record.endEntry = this.currentEntryIndex; } }
     endEffectsNamed(target, name) { for (const record of this.effectTimeline) if (record.target === target && record.name === name && record.end > this.now) this.endEffect(record); }
     // Tacticals trigger automatically at ANY moment their condition holds (UE below the threshold) while uses remain, or manually via the Tactical action.

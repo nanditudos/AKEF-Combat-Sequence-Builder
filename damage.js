@@ -68,7 +68,7 @@
       damageReduction,
       protection: 1 - (protections.length ? Math.max(...protections) : 0),
       defense: defenseMultiplier(enemy.defense),
-      resistance: (100 - (enemy.resistance[instance.element] || 0) - ignoreResistance - (enemy.resistanceShred || 0)) / 100,
+      resistance: (100 - ((enemy.resistance[instance.element] || 0) - ignoreResistance - (enemy.resistanceShred || 0))) / 100, // Ignore Resistance and Corrosion lower the enemy's resistance (more damage)
       multiplicative,
     };
     const damage = Object.values(factors).reduce((product, factor) => product * factor, 1);

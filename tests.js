@@ -26,7 +26,7 @@ Endfield.testsDone = (async function () {
   check('Link ignored on BATK', hit({ category: 'BasicAttack', linkStacks: 3 }, attacker(), enemy()), 500);
   check('resistance 20', hit({}, attacker(), enemy({ resistance: { Electric: 20 } })), 400);
   check('negative DEF -100', hit({}, attacker(), enemy({ defense: -100 })), 1000 * (2 - Math.pow(0.99, 100)));
-  check('ignore resistance 15 (tagged)', hit({}, attacker([E.mod('IgnoreResistance', 15, ['Electric'])]), enemy({ resistance: { Electric: 20 } })), 1000 * 0.65 * 0.5);
+  check('ignore resistance 15 (tagged)', hit({}, attacker([E.mod('IgnoreResistance', 15, ['Electric'])]), enemy({ resistance: { Electric: 20 } })), 1000 * 0.95 * 0.5);
   check('tagged bonus needs all tags', hit({}, attacker([E.mod('DamageBonus', 1, ['BattleSkill', 'Cryo'])]), enemy()), 500);
   check('vs-staggered bonus', hit({}, attacker([E.mod('DamageBonus', 0.2, ['Staggered'])]), enemy({ staggered: true })), 1000 * 1.2 * 1.3 * 0.5);
   check('crit mean', hit({}, attacker([], { criticalRate: 0.5 }), enemy(), { criticalMode: 'mean' }), 500 * 1.25);
@@ -35,7 +35,7 @@ Endfield.testsDone = (async function () {
   check('DoT never crits', hit({ subtype: 'DoT', category: 'Status' }, attacker([], { criticalRate: 1 }), enemy(), { criticalMode: 'always' }), 500);
   check('Arts status scaling', hit({ category: 'Status', statusKind: 'ArtsStatus' }, attacker([], { artsIntensity: 100 }), enemy()), 500 * (1 + 89 / 196) * 2);
   check('Protection uses max only', hit({}, attacker(), enemy({ modifiers: [E.mod('Protection', 0.2), E.mod('Protection', 0.5)] })), 250);
-  check('Corrosion shred', hit({}, attacker(), enemy({ resistanceShred: 10 })), 450);
+  check('Corrosion shred lowers resistance (more damage)', hit({}, attacker(), enemy({ resistanceShred: 10 })), 550);
 
 
 
@@ -463,6 +463,27 @@ Endfield.testsDone = (async function () {
     check('optimizer: two operators optimized together; Apply reproduces the reported damage', Math.abs(B.quickRun(applied).damage / result.best.damage - 1) < 1e-9 && Object.keys(result.best.genome).length === 2 ? 1 : 0, 1);
   };
   await optimizerTests();
+
+  // Resistance direction, icons, Roman numerals, reaction levels
+  check('resistance: Ignore Resistance raises damage (enemy 0 res, ignore 15 -> x1.15)', hit({}, attacker([E.mod('IgnoreResistance', 15, ['Electric'])]), enemy()) / 500, 1.15, 1e-9);
+  const p4 = (potential) => { const x = crew([me('ZhuangFangyi', { potential, startUltimateEnergy: 240 })]); x.run([step(0, 'Ultimate'), step(0, 'BasicAttack')]); return x; };
+  check('Fangyi: P5 deals MORE than P4 (Ignore Resistance 15 during the form) and has no separate effect', p4(5).damageLog.find((h) => h.category === 'BasicAttack').damage / p4(4).damageLog.find((h) => h.category === 'BasicAttack').damage * 100 + (p4(5).effectTimeline.some((e) => e.name === 'EmpyreanResistance') ? 1 : 0), 115, 1e-6);
+  check('roman numerals', E.roman(1) + E.roman(2) + E.roman(4) + E.roman(9) + E.roman(14) === 'IIIIVIXXIV' ? 1 : 0, 1);
+  check('icons: element Amp / Arts Amp / mixed Amp', [E.iconForModifiers([E.mod('Amp', 0.1, ['Electric'])]), E.iconForModifiers([E.mod('Amp', 0.1, ['Arts'])]), E.iconForModifiers([E.mod('Amp', 0.1, ['Electric']), E.mod('Amp', 0.1, ['Nature'])])].join() === 'Electric_Amp,Arts_Amp,Generic_Amp' ? 1 : 0, 1);
+  check('icons: single-element damage bonus / damage taken, Arts, crit, defence, default', [E.iconForModifiers([E.mod('DamageBonus', 0.1, ['Electric', 'BattleSkill'])]), E.iconForModifiers([E.mod('DamageTaken', 0.1, ['Physical'])]), E.iconForModifiers([E.mod('DamageTaken', 0.1, ['Arts'])]),
+    E.iconForModifiers([E.mod('CriticalRate', 0.1)]), E.iconForModifiers([E.mod('DEFBonus', 0.1)]), E.iconForModifiers([E.mod('ATKBonus', 0.1)]), E.iconForModifiers([E.mod('DamageBonus', 0.1, ['Cryo']), E.mod('DamageBonus', 0.1, ['Nature'])])].join() === 'Generic_Electric,Generic_Physical,Generic_Aether,Critical,Generic_Defense,Generic_Attack,Generic_Attack' ? 1 : 0, 1);
+  check('icons: susceptibility mapping', [E.susceptibilityIcon('Heat'), E.susceptibilityIcon('Physical'), E.susceptibilityIcon('Arts'), E.susceptibilityIcon('Other')].join() === 'Heat_Susceptibility,Physical_Susceptibility,Arts_Susceptibility,Generic_Susceptibility' ? 1 : 0, 1);
+  view = B.simulate(B.defaultState());
+  check('builder: Force of Nature carries the Electric_Amp icon', (view.rows[0].effects[0].find((e) => e.name === 'ForceOfNature') || {}).icon === 'Electric_Amp' ? 1 : 0, 1);
+  state = B.defaultState(); state.team[1] = B.newSlot('Perlica', '', []); state.actions = [{ slot: 1, action: 'BattleSkill', extraDelay: 0 }];
+  view = B.simulate(state);
+  check('builder: Electric Infliction on the enemy has its icon', (view.rows[0].effects[5].find((e) => e.name === 'Electric Infliction') || {}).icon === 'Electric_Infliction' ? 1 : 0, 1);
+  r = crew([me('ZhuangFangyi')]); r.run([script(0, function* (a) { a.applyReaction('Electric', 2); a.applyInfliction('Heat'); })]);
+  const reactionRecord = r.effectTimeline.find((e) => e.name === 'Electrification');
+  check('reactions are logged with a plain name, a level and an icon', reactionRecord.level * 100 + (reactionRecord.icon === 'Electrification' ? 1 : 0), 201);
+  const swapped = OPT.createProblem(B.defaultState(), {}), g1 = OPT.baseGenome(swapped), g2 = JSON.parse(JSON.stringify(g1));
+  [g2[0].kit1, g2[0].kit2] = [g1[0].kit2, g1[0].kit1];
+  check('optimizer: swapping the two kits is the same build', OPT.evaluate(swapped, g1).damage === OPT.evaluate(swapped, g2).damage && OPT.evaluate(swapped, g1) === OPT.evaluate(swapped, g2) ? 1 : 0, 1);
 
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,
