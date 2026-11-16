@@ -141,8 +141,7 @@
       this.operator.sheet.currentTime = this.now;
       const cost = this.operator.sheet.ultimateEnergyCost(baseCost);
       if (this.operator.ultimateEnergy < cost - 1e-9) this.simulation.warn(`${this.operator.name}: ultimate cast with ${this.operator.ultimateEnergy.toFixed(1)}/${cost.toFixed(1)} UE`);
-      this.operator.ultimateEnergy -= cost;
-      this.simulation.checkTacticals();
+      this.operator.ultimateEnergy -= cost; // tacticals are checked after the cast has resolved (see castSkill)
     }
     enterForm(name, duration) { this.simulation.logEffect(this.operator.name, 'Form: ' + name, { end: this.now + duration }); Object.assign(this.operator, { form: name, formUntil: this.now + duration, basicAttackIndex: 0 }); }
     setLabel(text) { if (this.record) this.record.label = text; } // action name shown in the sequence
@@ -215,12 +214,13 @@
     endEffect(record, time = this.now) { if (record && record.end > time) { record.end = time; record.endOrder = ++this.orderCounter; record.endEntry = this.currentEntryIndex; } }
     endEffectsNamed(target, name) { for (const record of this.effectTimeline) if (record.target === target && record.name === name && record.end > this.now) this.endEffect(record); }
     // Tacticals trigger automatically at ANY moment their condition holds (UE below the threshold) while uses remain, or manually via the Tactical action.
-    // Assumptions: the gain is a fraction of the recipient's max UE, is not scaled by Ultimate Efficiency, and ignores "cannot gain UE" form blocks.
+    // The gain is a fraction of the recipient's max UE, is not scaled by Ultimate Efficiency, and IS blocked while a form forbids UE gain (a blocked tactical does not fire).
     useTactical(operator, manual = false) {
       const tactical = operator.tactical;
       if (!tactical || operator.tacticalUses <= 0) return false;
       operator.tacticalUses--;
-      for (const target of tactical.targets === 'team' ? this.operators : [operator]) target.addUltimateEnergyDirect(tactical.gainFraction * target.ultimateEnergyMax(this.now), this.now, true);
+      if (manual && (operator.flags.blockUltimateEnergyUntil || 0) > this.now) this.warn(`${operator.name}: tactical used while Ultimate Energy gain is blocked`);
+      for (const target of tactical.targets === 'team' ? this.operators : [operator]) target.addUltimateEnergyDirect(tactical.gainFraction * target.ultimateEnergyMax(this.now), this.now);
       this.logInstant(operator.name, 'Tactical: ' + tactical.name, manual ? 'manual' : 'auto');
       return true;
     }
@@ -234,7 +234,14 @@
           for (const operator of this.operators) {
             if (!operator.tactical || operator.tacticalUses <= 0) continue;
             const max = operator.ultimateEnergyMax(this.now);
-            if (max > 0 && operator.ultimateEnergy < operator.tactical.threshold * max - 1e-9) { this.useTactical(operator); triggered = true; }
+            if (!(max > 0 && operator.ultimateEnergy < operator.tactical.threshold * max - 1e-9)) continue;
+            const blockedUntil = operator.flags.blockUltimateEnergyUntil || 0;
+            if (blockedUntil > this.now) { // cannot gain UE right now: look again when the block ends
+              this.tacticalRechecks = this.tacticalRechecks || new Set();
+              if (!this.tacticalRechecks.has(blockedUntil)) { this.tacticalRechecks.add(blockedUntil); this.schedule(blockedUntil, () => this.checkTacticals()); }
+              continue;
+            }
+            this.useTactical(operator); triggered = true;
           }
         }
       } finally { this.checkingTacticals = false; }
@@ -312,6 +319,7 @@
         ability.lockFor(DEFAULT_ACTION_DURATION);
         this.emit('SkillCast', { source: ability, category });
         this.runAbility(run(ability), ability);
+        this.checkTacticals();
       };
       if (entry.action === 'Switch') {
         ability.setLabel(this.controlled === operator ? 'Switch (already controlled)' : 'Switch → ' + operator.name);

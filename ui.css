@@ -39,3 +39,6 @@ select { min-width: 0; max-width: 100%; } input[type=number] { width: 54px; }
 
 .field label.radio { width: auto; display: inline-flex; align-items: center; gap: 2px; color: var(--text); font-size: 12px; margin-right: 6px; cursor: help; }
 .field input[type=radio] { margin: 0; accent-color: var(--accent); }
+
+aside { width: 250px; } aside hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; } aside details { margin: 2px 0; } aside summary { cursor: pointer; } aside details div { font-size: 11px; }
+.opt-results { margin: 4px 0; } aside .field label { width: 36px; }

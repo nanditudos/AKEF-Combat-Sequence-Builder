@@ -29,6 +29,7 @@
     for (const child of children.flat()) if (child !== null && child !== undefined && child !== false) node.append(child);
     return node;
   };
+  const appendAll = (parent, ...children) => parent.append(...children.flat().filter((child) => child !== null && child !== undefined && child !== false));
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   const select = (options, value, onChange, props = {}) => {
     const node = el('select', props);
@@ -79,6 +80,7 @@
       field('Kit 1', select(gearOptions(D.gear.kits), slot.gear.kit1, (v) => update(() => { slot.gear.kit1 = v; })), lockBox(slot, 'kit1')),
       field('Kit 2', select(gearOptions(D.gear.kits), slot.gear.kit2, (v) => update(() => { slot.gear.kit2 = v; })), lockBox(slot, 'kit2')),
       field('Set', el('span', { class: 'dim' }, activeSets.join(', ') || 'none'), lockBox(slot, 'set')),
+      field('Rule', select([['', 'none'], ['INT>=WIL', 'INT ≥ WIL'], ['WIL>INT', 'WIL > INT']], slot.rule || '', (v) => update(() => { slot.rule = v; }), { title: 'Optimizer constraint on permanent INT / WIL, e.g. to force Arcane\'s INT or WILL mode' })),
       field('Cons.', select([['', '—'], ...sortedByTier(D.consumables)], slot.consumable || '', (v) => update(() => { slot.consumable = v; })), lockBox(slot, 'consumable')),
       field('Tact.', select([['', '—'], ...sortedByTier(D.tacticals)], slot.tactical || '', (v) => update(() => { slot.tactical = v; }))),
       field('UE', select([['empty', 'starts at 0'], ['full', 'starts full']], slot.ue, (v) => update(() => { slot.ue = v; }))));
@@ -118,7 +120,7 @@
   }
   function enemyStatsCell(view) {
     const cell = el('div', { class: 'cell enemy-col' }), stagger = view.finalStagger;
-    if (stagger) cell.append(el('div', {}, el('span', { class: 'dim' }, 'Stagger end '), el('b', {}, `${Math.round(stagger.value)}/${stagger.capacity}`)), stagger.staggered ? el('div', { class: 'bad' }, 'Staggered') : null);
+    if (stagger) appendAll(cell, el('div', {}, el('span', { class: 'dim' }, 'Stagger end '), el('b', {}, `${Math.round(stagger.value)}/${stagger.capacity}`)), stagger.staggered ? el('div', { class: 'bad' }, 'Staggered') : null);
     return cell;
   }
 
@@ -174,7 +176,43 @@
     if (r.warnings.length) box.append(el('details', {}, el('summary', { class: 'bad' }, `${r.warnings.length} warning(s)`), r.warnings.map((w) => el('div', {}, `${w.time.toFixed(2)}s  ${w.text}`))));
     return box;
   }
-  const sidebar = () => el('aside', {}, el('h2', {}, 'Optimizer'), el('p', {}, 'Reserved for optimizer settings and results.'),
+  // ---------- optimizer panel ----------
+  const opt = { config: { population: 60, generations: 80, seed: 1, allowWarnings: true }, running: false, stop: false, progress: null, results: null, error: null };
+  const refreshSidebar = () => { const old = document.querySelector('aside'); if (old) old.replaceWith(sidebar()); };
+  async function runOptimizer() {
+    Object.assign(opt, { running: true, stop: false, results: null, error: null, progress: null });
+    refreshSidebar();
+    try {
+      const problem = E.optimizer.createProblem(state, opt.config);
+      opt.results = await E.optimizer.run(problem, opt.config, { onProgress: (p) => { opt.progress = p; refreshSidebar(); }, shouldStop: () => opt.stop });
+    } catch (error) { opt.error = error; }
+    opt.running = false;
+    refreshSidebar();
+  }
+  const buildLines = (genome) => Object.entries(genome).map(([index, g]) =>
+    el('div', { class: 'dim' }, `${D.operators[state.team[index].op].name}: ${[g.armor, g.gloves, g.kit1, g.kit2].join(' · ')}${g.consumable ? ' · ' + D.consumables[g.consumable].name : ''}`));
+  function resultsBlock() {
+    const r = opt.results, box = el('div', { class: 'opt-results' });
+    if (opt.error) return el('div', { class: 'err' }, String(opt.error.message || opt.error));
+    if (opt.progress && opt.running) box.append(el('div', { class: 'dim' }, `${opt.progress.phase} ${opt.progress.generation}/${opt.progress.generations} · best ${fmt(opt.progress.best)} · ${opt.progress.evaluations} sims · ${opt.progress.seconds.toFixed(1)}s`));
+    if (!r) return box;
+    appendAll(box, el('div', {}, 'Current ', el('b', {}, fmt(r.baseline.damage)), r.baseline.warnings ? el('span', { class: 'bad' }, ` (${r.baseline.warnings} warnings)`) : null),
+      el('div', { class: 'dim' }, `${r.evaluations} sims in ${r.seconds.toFixed(1)}s${r.stopped ? ' (stopped)' : ''}`),
+      !r.feasible && !opt.config.allowWarnings ? el('div', { class: 'bad' }, 'No warning-free build exists; showing the fewest warnings.') : null);
+    r.builds.slice(0, 6).forEach((build, i) => box.append(el('details', { open: i === 0 },
+      el('summary', {}, `#${i + 1} `, el('b', {}, fmt(build.damage)), el('span', { class: build.gain >= 0 ? 'good' : 'bad' }, ` ${build.gain >= 0 ? '+' : ''}${(build.gain * 100).toFixed(1)}%`), build.warnings ? el('span', { class: 'bad' }, ` ${build.warnings}⚠`) : null),
+      buildLines(build.genome), el('button', { onclick: () => { E.optimizer.applyBuild(state, build.genome); render(); } }, 'Apply'))));
+    return box;
+  }
+  const sidebar = () => el('aside', {}, el('h2', {}, 'Optimizer'),
+    el('p', {}, 'Optimizes armor, gloves, kits and consumable of every operator for the team damage of this sequence. Locked parts, weapons, tacticals and potentials stay.'),
+    field('Pop.', numberInput(opt.config.population, (v) => { opt.config.population = Math.max(6, Math.round(v)); }, { min: 6 })),
+    field('Gen.', numberInput(opt.config.generations, (v) => { opt.config.generations = Math.max(0, Math.round(v)); }, { min: 0 })),
+    field('Seed', numberInput(opt.config.seed, (v) => { opt.config.seed = Math.round(v); })),
+    el('label', { class: 'radio', title: 'Off: builds that produce warnings (negative SP, missing UE, closed combo window...) rank below every warning-free build.' },
+      el('input', { type: 'checkbox', checked: opt.config.allowWarnings, onchange: (e) => { opt.config.allowWarnings = e.target.checked; } }), 'Allow warnings'),
+    el('div', {}, el('button', { disabled: opt.running, onclick: runOptimizer }, 'Optimize'), ' ', el('button', { disabled: !opt.running, onclick: () => { opt.stop = true; } }, 'Stop')),
+    resultsBlock(), el('hr'),
     el('button', { onclick: () => update(() => { state.actions = []; }) }, 'Clear sequence'), ' ',
     el('button', { onclick: () => { state = B.defaultState(); render(); } }, 'Reset all'));
 

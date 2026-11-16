@@ -4,7 +4,11 @@
   const { mod } = globalThis.Endfield;
   const gear = (Endfield.data.gear = Endfield.data.gear || { armor: [], gloves: [], kits: [], setBonuses: {} });
   const piece = (name, set, ...modifiers) => ({ name, set, modifiers: modifiers.flat() });
-  gear.byName = (name) => [...gear.armor, ...gear.gloves, ...gear.kits].find((candidate) => candidate.name === name);
+  let index = null; // name -> piece, built on first use
+  gear.byName = (name) => {
+    if (!index) { index = new Map(); for (const candidate of [...gear.armor, ...gear.gloves, ...gear.kits]) index.set(candidate.name, candidate); }
+    return index.get(name);
+  };
   gear.kits.push(piece('Aethertech Analysis Band', 'Aethertech', mod('DEF', 21), mod('STR', 41), mod('WIL', 27), mod('DamageBonus', 0.299, ['Physical'])));
   gear.gloves.push(piece('Aethertech Gloves', 'Aethertech', mod('DEF', 42), mod('STR', 55), mod('AGL', 84), mod('ArtsIntensity', 44.9)));
   gear.gloves.push(piece('Aethertech Light Gloves', 'Aethertech', mod('DEF', 42), mod('AGL', 55), mod('WIL', 84), mod('DamageBonus', 0.299, ['BattleSkill']), mod('DamageBonus', 0.299, ['ComboSkill']), mod('DamageBonus', 0.299, ['Ultimate'])));

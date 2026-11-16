@@ -6,7 +6,7 @@
   const COLUMNS = 6; // 4 operators, Team (+ battlefield), Enemy
 
   const newSlot = (op = '', weapon = '', gear = []) => ({
-    op, potential: 0, weapon, consumable: '', tactical: '', ue: 'empty',
+    op, potential: 0, weapon, consumable: '', tactical: '', ue: 'empty', rule: '',
     gear: { armor: gear[0] || '', gloves: gear[1] || '', kit1: gear[2] || '', kit2: gear[3] || '' },
     locks: { armor: false, gloves: false, kit1: false, kit2: false, weapon: false, consumable: false, set: false },
   });
@@ -32,27 +32,44 @@
       HP: (operator.baseStats.HP + sheet.sum('HP') + 5 * strength) * (1 + sheet.sum('HPBonus')) };
   }
 
-  function simulate(state) {
+  // Shared set-up for simulate() and the optimizer's quickRun(): stats, simulation options and the action list.
+  function prepare(state) {
     const stats = state.team.map(slotStats);
     const filled = state.team.map((slot, index) => index).filter((index) => stats[index]);
-    const view = { stats, rows: [], filled, error: null };
     const enemy = D.enemies[state.enemy];
-    if (!filled.length || !enemy) return Object.assign(view, { empty: true });
+    if (!filled.length || !enemy) return { stats, filled, empty: true };
+    const toSim = new Map(filled.map((slotIndex, simIndex) => [slotIndex, simIndex]));
+    const members = filled.map((slotIndex) => {
+      const slot = state.team[slotIndex], st = stats[slotIndex];
+      return { operator: st.operator, potential: slot.potential, weapon: st.weapon, gearPieces: st.gearPieces, consumable: st.consumable, tactical: st.tactical,
+        startUltimateEnergy: slot.ue === 'full' ? st.sheet.ultimateEnergyCost(st.operator.ultimateEnergyCost || 0) : 0 };
+    });
+    const options = { team: members, enemy, setBonuses: D.gear.setBonuses, criticalMode: state.crit, startingSP: state.startSP,
+      initialStagger: state.initialStagger, startStaggeredFor: state.startStaggeredFor };
+    const simEntries = [], uiToSim = [], simToUi = [];
+    state.actions.forEach((action, uiIndex) => {
+      if (!toSim.has(action.slot)) return;
+      uiToSim[uiIndex] = simEntries.length; simToUi[simEntries.length] = uiIndex;
+      simEntries.push({ operator: toSim.get(action.slot), action: action.action, extraDelay: action.extraDelay || 0 });
+    });
+    return { stats, filled, enemy, options, simEntries, uiToSim, simToUi };
+  }
+
+  // Fast path for the optimizer: total damage and warning count only.
+  function quickRun(state) {
+    const prepared = prepare(state);
+    if (prepared.empty) return { damage: 0, warnings: 0 };
+    const result = new E.Simulation(prepared.options).run(prepared.simEntries);
+    return { damage: result.totalDamage, warnings: result.warnings.length };
+  }
+
+  function simulate(state) {
+    const prepared = prepare(state), { stats, filled } = prepared;
+    const view = { stats, rows: [], filled, error: null };
+    if (prepared.empty) return Object.assign(view, { empty: true });
     try {
-      const toSim = new Map(filled.map((slotIndex, simIndex) => [slotIndex, simIndex]));
-      const members = filled.map((slotIndex) => {
-        const slot = state.team[slotIndex], st = stats[slotIndex];
-        return { operator: st.operator, potential: slot.potential, weapon: st.weapon, gearPieces: st.gearPieces, consumable: st.consumable, tactical: st.tactical,
-          startUltimateEnergy: slot.ue === 'full' ? st.sheet.ultimateEnergyCost(st.operator.ultimateEnergyCost || 0) : 0 };
-      });
-      const sim = new E.Simulation({ team: members, enemy, setBonuses: D.gear.setBonuses, criticalMode: state.crit, startingSP: state.startSP,
-        initialStagger: state.initialStagger, startStaggeredFor: state.startStaggeredFor });
-      const simEntries = [], uiToSim = [], simToUi = [];
-      state.actions.forEach((action, uiIndex) => {
-        if (!toSim.has(action.slot)) return;
-        uiToSim[uiIndex] = simEntries.length; simToUi[simEntries.length] = uiIndex;
-        simEntries.push({ operator: toSim.get(action.slot), action: action.action, extraDelay: action.extraDelay || 0 });
-      });
+      const { enemy, uiToSim, simToUi, simEntries } = prepared;
+      const sim = new E.Simulation(prepared.options);
       const result = sim.run(simEntries);
       const nameToColumn = new Map(filled.map((slotIndex) => [stats[slotIndex].operator.name, slotIndex]));
       const rows = state.actions.map((entry, index) => {
@@ -93,5 +110,5 @@
     return view;
   }
 
-  E.builder = { SLOT_KEYS, ACTIONS, COLUMNS, newSlot, defaultState, slotStats, simulate };
+  E.builder = { SLOT_KEYS, ACTIONS, COLUMNS, newSlot, defaultState, slotStats, prepare, quickRun, simulate };
 })();

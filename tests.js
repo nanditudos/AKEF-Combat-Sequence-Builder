@@ -1,4 +1,4 @@
-(function () {
+Endfield.testsDone = (async function () {
   const E = globalThis.Endfield, results = [];
   const check = (name, actual, expected, tolerance = 1e-6) => {
     results.push({ name, pass: Math.abs(actual - expected) <= tolerance, actual, expected });
@@ -406,7 +406,10 @@
   check('UE: overflow above the pool (240) is lost', r.operators[0].ultimateEnergy, 240);
   r = crew([me('ZhuangFangyi', { startUltimateEnergy: 240, tactical: d.tacticals.StewMeeting })]);
   r.run([step(0, 'Ultimate')]);
-  check('tactical: triggers after the ultimate drains UE (even in the form that blocks UE gain)', Math.round(r.operators[0].ultimateEnergy), 144);
+  check('tactical: does not fire (no use wasted) while the form blocks UE gain', Math.round(r.operators[0].ultimateEnergy) * 10 + r.operators[0].tacticalUses, 4);
+  r = crew([me('ZhuangFangyi', { startUltimateEnergy: 240, tactical: d.tacticals.StewMeeting })]);
+  r.run([step(0, 'Ultimate'), script(0, function* () {}, { lock: 26 })]);
+  check('tactical: fires again once the 25s block ends (0 -> 144 UE, 3 uses)', Math.round(r.operators[0].ultimateEnergy) * 10 + r.operators[0].tacticalUses, 1441);
   r = crew([me('Liino'), me('Perlica')]);
   r.run([step(0, 'BattleSkill'), script(1, function* (a) { a.applyReaction('Electric', 1); }, { extraDelay: 1.5 }), step(0, 'ComboSkill'), step(1, 'BattleSkill')]);
   const starry = r.effectTimeline.find((e) => e.name === 'Starry Boost of 1st Magnitude');
@@ -418,6 +421,48 @@
   check('quality: Perlica is 5 stars, default 6', (O.Perlica.stars || 6) * 10 + (O.Arcane.stars || 6), 56);
   state = B.defaultState(); state.team[0].consumable = 'JakubsLegacy'; state.team[0].tactical = 'StewMeeting';
   check('builder: shown ATK includes the consumable', B.slotStats(state.team[0]).ATK / B.slotStats(B.defaultState().team[0]).ATK > 1.1 ? 1 : 0, 1);
+
+  // Optimizer
+  const OPT = E.optimizer;
+  const optimize = async (stateIn, config = {}) => { const problem = OPT.createProblem(stateIn, { allowWarnings: true, ...config }); const result = await OPT.run(problem, { population: 14, generations: 8, seed: 3, ...config }); return { problem, result }; };
+  const countSet = (genes, setName) => ['armor', 'gloves', 'kit1', 'kit2'].filter((k) => (d.gear.byName(genes[k]) || {}).set === setName).length;
+  const optimizerTests = async () => {
+    let s0 = B.defaultState();
+    const cat = OPT.buildCatalog(O.ZhuangFangyi);
+    check('optimizer: catalogs merge identical pieces', cat.armor.length <= d.gear.armor.length && cat.kits.length <= d.gear.kits.length && cat.consumable[0] === '' ? 1 : 0, 1);
+    let { result } = await optimize(s0);
+    check('optimizer: result is at least as good as the current build', result.best.damage >= result.baseline.damage - 1e-6 ? 1 : 0, 1);
+    s0 = B.defaultState(); s0.team[0].locks.armor = true; s0.team[0].locks.gloves = true; s0.team[0].locks.consumable = true;
+    ({ result } = await optimize(s0));
+    const g = result.builds[0].genome[0];
+    check('optimizer: locked armor / gloves / consumable never change', g.armor === 'Xiranflow Light Armor' && g.gloves === 'Xiranflow Gloves' && g.consumable === '' ? 1 : 0, 1);
+    s0 = B.defaultState(); s0.team[0].locks.set = true;
+    ({ result } = await optimize(s0));
+    check('optimizer: set lock keeps >= 3 Xiranflow pieces in every returned build', result.builds.every((b) => countSet(b.genome[0], 'Xiranflow') >= 3) ? 1 : 0, 1);
+    s0 = B.defaultState(); const noSet = (list) => list.find((p) => !p.set).name;
+    Object.assign(s0.team[0].gear, { armor: noSet(d.gear.armor), gloves: noSet(d.gear.gloves), kit1: noSet(d.gear.kits), kit2: noSet(d.gear.kits) }); s0.team[0].locks.set = true;
+    ({ result } = await optimize(s0));
+    check('optimizer: locking "no set bonus" never produces a set bonus', result.builds.every((b) => { const sets = {}; for (const k of ['armor', 'gloves', 'kit1', 'kit2']) { const n = (d.gear.byName(b.genome[0][k]) || {}).set; if (n) sets[n] = (sets[n] || 0) + 1; } return Object.values(sets).every((c) => c < 3); }) ? 1 : 0, 1);
+    for (const rule of ['INT>=WIL', 'WIL>INT']) {
+      s0 = B.defaultState(); s0.team[0] = B.newSlot('Arcane', '', []); s0.team[0].rule = rule; s0.actions = [{ slot: 0, action: 'BattleSkill', extraDelay: 0 }];
+      ({ result } = await optimize(s0));
+      const verify = JSON.parse(JSON.stringify(s0)); OPT.applyBuild(verify, result.best.genome);
+      check(`optimizer: Arcane rule ${rule} holds for the best build`, OPT.RULES[rule](B.slotStats(verify.team[0]).sheet) ? 1 : 0, 1);
+    }
+    const pr = OPT.createProblem(B.defaultState(), { allowWarnings: false });
+    check('optimizer: with warnings disallowed a warning-free build beats a higher-damage build with warnings', OPT.compare(pr, { valid: true, damage: 1, warnings: 0 }, { valid: true, damage: 99, warnings: 2 }) > 0 ? 1 : 0, 1);
+    check('optimizer: with warnings allowed only damage counts', OPT.compare(OPT.createProblem(B.defaultState(), { allowWarnings: true }), { valid: true, damage: 1, warnings: 0 }, { valid: true, damage: 99, warnings: 2 }) < 0 ? 1 : 0, 1);
+    s0 = B.defaultState(); s0.actions = [{ slot: 0, action: 'ComboSkill', extraDelay: 0 }];
+    ({ result } = await optimize(s0, { allowWarnings: false }));
+    check('optimizer: reports when no warning-free build exists', result.feasible ? 0 : 1, 1);
+    s0 = B.defaultState(); const first = await optimize(s0), second = await optimize(s0);
+    check('optimizer: same seed gives the same best build', first.result.best.key === second.result.best.key ? 1 : 0, 1);
+    s0 = B.defaultState(); s0.team[1] = B.newSlot('Perlica', 'WildWanderer', []); s0.actions = [...Array(5).fill(0).map(() => ({ slot: 0, action: 'BasicAttack', extraDelay: 0 })), { slot: 1, action: 'ComboSkill', extraDelay: 0 }, { slot: 1, action: 'BattleSkill', extraDelay: 0 }];
+    ({ result } = await optimize(s0));
+    const applied = JSON.parse(JSON.stringify(s0)); OPT.applyBuild(applied, result.best.genome);
+    check('optimizer: two operators optimized together; Apply reproduces the reported damage', Math.abs(B.quickRun(applied).damage / result.best.damage - 1) < 1e-9 && Object.keys(result.best.genome).length === 2 ? 1 : 0, 1);
+  };
+  await optimizerTests();
 
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,
