@@ -4,6 +4,9 @@
   const E = globalThis.Endfield, B = E.builder, D = E.data;
   const STORAGE_KEY = 'endfieldSimState.v1';
   const ACTION_LABEL = Object.fromEntries(B.ACTIONS);
+  const DEFAULT_LABEL = { BasicAttack: 'Basic Attack', BattleSkill: 'Battle Skill', ComboSkill: 'Combo Skill', Ultimate: 'Ultimate', Finisher: 'Finisher', DiveAttack: 'Dive Attack', Switch: 'Switch' };
+  const HIT_LABEL = { FinalStrike: 'Final Strike', Finisher: 'Finisher', Dive: 'Dive Attack', ArtsBurst: 'Arts Burst', ArtsReaction: 'Arts Reaction', PhysicalStatus: 'Physical Status', Shatter: 'Shatter', ExtraHit: 'Extra Hit', DoT: 'DoT',
+    BasicAttack: 'Basic Attack', BattleSkill: 'Battle Skill', ComboSkill: 'Combo Skill', Ultimate: 'Ultimate', Status: 'Status' };
   const COLUMN_CLASS = ['', '', '', '', 'team-col', 'enemy-col'];
 
   const loadState = () => {
@@ -42,11 +45,12 @@
   const hue = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const iconEl = (effect) => {
     const custom = (E.icons || {})[effect.name];
-    const title = effect.name + (effect.detail ? ' ' + effect.detail : '') + (effect.count > 1 ? ' ×' + effect.count : '');
-    const box = el('span', { class: 'icon', title });
+    const title = effect.name + (effect.detail ? ' (' + effect.detail + ')' : '') + (effect.count > 1 ? ' ×' + effect.count : '') + (effect.ended ? ' — ends / consumed on this row' : '');
+    const box = el('span', { class: 'icon' + (effect.ended ? ' ended' : ''), title });
     box.style.background = `hsl(${hue(effect.name)} 45% 32%)`;
     if (custom && /[\/.]/.test(custom)) box.append(el('img', { src: custom, alt: effect.name }));
     else box.textContent = custom || effect.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2);
+    if (effect.count > 1) box.append(el('i', { class: 'n' }, String(effect.count)));
     return box;
   };
 
@@ -62,6 +66,7 @@
       (value) => update(() => { slot.op = value; slot.weapon = ''; slot.potential = 0; }), { class: 'opselect' }));
     const operator = D.operators[slot.op];
     if (!operator) return wrap;
+    const activeSets = B.slotStats(slot).activeSets;
     const weapons = Object.entries(D.weapons).filter(([, w]) => w.type === operator.weaponType).sort((a, b) => b[1].stars - a[1].stars || a[1].name.localeCompare(b[1].name));
     wrap.append(
       field('Pot.', select([0, 1, 2, 3, 4, 5].map((n) => [String(n), 'P' + n]), String(slot.potential), (v) => update(() => { slot.potential = Number(v); }))),
@@ -70,7 +75,8 @@
       field('Gloves', select(gearOptions(D.gear.gloves), slot.gear.gloves, (v) => update(() => { slot.gear.gloves = v; })), lockBox(slot, 'gloves')),
       field('Kit 1', select(gearOptions(D.gear.kits), slot.gear.kit1, (v) => update(() => { slot.gear.kit1 = v; })), lockBox(slot, 'kit1')),
       field('Kit 2', select(gearOptions(D.gear.kits), slot.gear.kit2, (v) => update(() => { slot.gear.kit2 = v; })), lockBox(slot, 'kit2')),
-      field('Tact.', select([['', 'None']], slot.tactical, () => {})),
+      field('Set', el('span', { class: 'dim' }, activeSets.join(', ') || 'none'), lockBox(slot, 'set')),
+      field('Tact.', select([['', 'None']], slot.tactical, () => {}), lockBox(slot, 'tactical')),
       field('UE', select([['empty', 'starts at 0'], ['full', 'starts full']], slot.ue, (v) => update(() => { slot.ue = v; }))));
     return wrap;
   }
@@ -90,6 +96,7 @@
     for (const key of ['HP', 'ATK', 'STR', 'AGL', 'INT', 'WIL']) cell.append(el('div', { class: 'stat' + (key === main ? ' main' : '') }, el('span', {}, key + ' '), el('b', {}, fmt(stats[key]))));
     const ue = (view.finalUE || []).find(([slotIndex]) => slotIndex === index);
     if (ue) cell.append(el('div', { class: 'dim' }, `UE end ${ue[1].toFixed(1)}`));
+    if (view.initialControlled === index) cell.append(el('div', { class: 'tag' }, '★ controlled at start'));
     return cell;
   }
   function teamStatsCell(view) {
@@ -109,9 +116,10 @@
   const move = (index, delta) => update(() => { const j = index + delta; if (j >= 0 && j < state.actions.length) [state.actions[index], state.actions[j]] = [state.actions[j], state.actions[index]]; });
   function chip(row) {
     const { entry, record } = row, invalid = !record || record.invalid;
-    const tip = row.hits.map((h) => `${h.time.toFixed(2)}s ${h.category}${h.subtype ? '/' + h.subtype : ''} ×${h.multiplier.toFixed(2)} = ${fmt(h.damage)}`).join('\n');
+    const percent = (m) => Number((m * 100).toFixed(1));
+    const tip = row.hits.map((h) => `${h.time.toFixed(2)} s ${HIT_LABEL[h.subtype] || HIT_LABEL[h.category] || h.category} ${percent(h.multiplier)}% = ${fmt(h.damage)} ${h.element || ''}`).join('\n');
     return el('div', { class: 'chip' + (invalid ? ' invalid' : ''), title: tip },
-      el('b', {}, ACTION_LABEL[entry.action] || entry.action),
+      el('b', {}, row.label || DEFAULT_LABEL[entry.action] || entry.action),
       row.damage > 0 ? el('span', { class: 'dmg' }, fmt(row.damage)) : null,
       invalid ? el('span', { class: 'reason' }, record ? record.invalid : 'empty slot') : null,
       el('span', { class: 'ctl' },
@@ -122,7 +130,7 @@
   function timelineRow(row) {
     const cells = [el('div', { class: 'cell' }, row.record && !row.record.invalid ? row.record.start.toFixed(2) : '–')];
     for (let column = 0; column < B.COLUMNS; column++) {
-      const cell = el('div', { class: 'cell ' + COLUMN_CLASS[column] });
+      const cell = el('div', { class: 'cell ' + COLUMN_CLASS[column] + (column === row.controlled ? ' ctl' : '') });
       if (column === row.entry.slot) cell.append(chip(row));
       if (row.effects[column].length) cell.append(el('div', { class: 'icons' }, row.effects[column].map(iconEl)));
       cells.push(cell);

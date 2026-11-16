@@ -8,7 +8,7 @@
   const newSlot = (op = '', weapon = '', gear = []) => ({
     op, potential: 0, weapon, tactical: '', ue: 'empty',
     gear: { armor: gear[0] || '', gloves: gear[1] || '', kit1: gear[2] || '', kit2: gear[3] || '' },
-    locks: { armor: false, gloves: false, kit1: false, kit2: false, weapon: false },
+    locks: { armor: false, gloves: false, kit1: false, kit2: false, weapon: false, tactical: false, set: false },
   });
   const defaultState = () => ({
     team: [newSlot('ZhuangFangyi', 'LoneBarge', ['Xiranflow Light Armor', 'Xiranflow Gloves', 'Xiranflow Baton', 'LYNX Slab']), newSlot(), newSlot(), newSlot()],
@@ -23,7 +23,10 @@
     const weapon = D.weapons[slot.weapon];
     const sheet = E.buildStatSheet({ operator, potential: slot.potential, weapon, gearPieces, setBonuses: D.gear.setBonuses });
     const strength = sheet.attribute('STR');
-    return { operator, weapon, gearPieces, sheet, ATK: sheet.attack(), STR: strength, AGL: sheet.attribute('AGL'), INT: sheet.attribute('INT'), WIL: sheet.attribute('WIL'),
+    const perSet = {};
+    for (const piece of gearPieces) if (piece.set) perSet[piece.set] = (perSet[piece.set] || 0) + 1;
+    const activeSets = Object.keys(perSet).filter((name) => perSet[name] >= 3);
+    return { operator, weapon, gearPieces, sheet, activeSets, ATK: sheet.attack(), STR: strength, AGL: sheet.attribute('AGL'), INT: sheet.attribute('INT'), WIL: sheet.attribute('WIL'),
       HP: (operator.baseStats.HP + sheet.sum('HP') + 5 * strength) * (1 + sheet.sum('HPBonus')) };
   }
 
@@ -49,8 +52,12 @@
         simEntries.push({ operator: toSim.get(action.slot), action: action.action, extraDelay: action.extraDelay || 0 });
       });
       const result = sim.run(simEntries);
-      const rows = state.actions.map((entry, index) => ({ index, entry, record: uiToSim[index] === undefined ? null : sim.timeline[uiToSim[index]],
-        damage: 0, hits: [], effects: Array.from({ length: COLUMNS }, () => []) }));
+      const nameToColumn = new Map(filled.map((slotIndex) => [stats[slotIndex].operator.name, slotIndex]));
+      const rows = state.actions.map((entry, index) => {
+        const record = uiToSim[index] === undefined ? null : sim.timeline[uiToSim[index]];
+        return { index, entry, record, label: record && record.label ? record.label : null, damage: 0, hits: [], effects: Array.from({ length: COLUMNS }, () => []),
+          controlled: record ? nameToColumn.get(record.controlled) : undefined };
+      });
       const rowForTime = (time) => {
         let found = null;
         for (const row of rows) if (row.record && !row.record.invalid && row.record.start <= time + 1e-9) found = row;
@@ -60,15 +67,25 @@
         const row = hit.entry !== undefined && simToUi[hit.entry] !== undefined ? rows[simToUi[hit.entry]] : rowForTime(hit.time);
         if (row) { row.damage += hit.damage; row.hits.push(hit); }
       }
-      const nameToColumn = new Map(filled.map((slotIndex) => [stats[slotIndex].operator.name, slotIndex]));
-      for (const effect of sim.effectLog) {
-        const column = effect.target === 'Team' ? 4 : effect.target === 'Enemy' ? 5 : nameToColumn.get(effect.target);
-        const row = rowForTime(effect.time);
-        if (column === undefined || !row) continue;
-        const list = row.effects[column], same = list.find((item) => item.name === effect.name);
-        if (same) same.count++; else list.push({ name: effect.name, count: 1, detail: effect.detail });
+      // Effects persist: a row lists every effect that is active when it executes, plus effects created or ended by the row itself.
+      for (const row of rows) {
+        if (!row.record) continue;
+        const simIndex = uiToSim[row.index], start = row.record.start, after = row.record.afterOrder;
+        for (const effect of sim.effectTimeline) {
+          const column = effect.target === 'Team' ? 4 : effect.target === 'Enemy' ? 5 : nameToColumn.get(effect.target);
+          if (column === undefined) continue;
+          if (effect.entry !== simIndex && !(effect.start <= start + 1e-9 && effect.order <= after)) continue;
+          const alive = effect.end > start + 1e-9 || (Math.abs(effect.end - start) <= 1e-9 && effect.endOrder > after);
+          if (!alive && effect.endEntry !== simIndex) continue;
+          const list = row.effects[column];
+          let item = list.find((candidate) => candidate.name === effect.name);
+          if (!item) { item = { name: effect.name, count: 0, ended: true, detail: effect.detail }; list.push(item); }
+          item.count++;
+          if (alive) item.ended = false;
+          if (effect.detail) item.detail = effect.detail;
+        }
       }
-      Object.assign(view, { sim, result, rows, finalUE: filled.map((slotIndex, simIndex) => [slotIndex, sim.operators[simIndex].ultimateEnergy]) });
+      Object.assign(view, { sim, result, rows, initialControlled: filled[0], finalUE: filled.map((slotIndex, simIndex) => [slotIndex, sim.operators[simIndex].ultimateEnergy]) });
     } catch (error) { view.error = error; }
     return view;
   }

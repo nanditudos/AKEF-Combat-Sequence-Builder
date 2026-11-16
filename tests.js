@@ -248,10 +248,10 @@
 
   r = crew([me('Perlica')]);
   r.run([...basicAttacks(0, 4), step(0, 'ComboSkill')]);
-  check('Perlica: Final Strike opens combo; forced Electrification lasts 5s', r.enemy.status.modifiers(9.99).length * 10 + r.enemy.status.modifiers(10.01).length, 10);
+  check('Perlica: Final Strike opens combo; forced Electrification lasts 5s', r.enemy.status.modifiers(8.99).length * 10 + r.enemy.status.modifiers(9.01).length, 10);
   r = crew([me('Perlica', { potential: 1 })]);
   r.run([...basicAttacks(0, 4), step(0, 'ComboSkill')]);
-  check('Perlica P1: Electrification +75% duration (8.75s)', r.enemy.status.modifiers(13.74).length * 10 + r.enemy.status.modifiers(13.76).length, 10);
+  check('Perlica P1: Electrification +75% duration (8.75s)', r.enemy.status.modifiers(12.74).length * 10 + r.enemy.status.modifiers(12.76).length, 10);
   r = crew([me('Perlica', { potential: 3 })]);
   r.run([step(0, 'BattleSkill'), script(0, function* (a) { a.applyReaction('Electric', 1); })]);
   check('Perlica P3: ATK +20% after applying Electrification', r.operators[0].stackCount('PerlicaP3', r.now), 1);
@@ -282,7 +282,7 @@
 
   r = crew([me('Gilberta'), me('Perlica')]);
   r.run([script(0, function* (a) { a.applyReaction('Heat', 1); }), step(0, 'ComboSkill')]);
-  check('Gilberta: combo forcibly Lifts (Vulnerable +1, Lifted)', r.enemy.status.vulnerableStacks(1.5) * 10 + (r.enemy.status.isLifted(1.5) ? 1 : 0), 11);
+  check('Gilberta: combo forcibly Lifts (Vulnerable +1, Lifted)', r.enemy.status.vulnerableStacks(0.5) * 10 + (r.enemy.status.isLifted(0.5) ? 1 : 0), 11);
   check("Gilberta: Messenger's Song +7% Ultimate Efficiency to a Caster ally", ((x) => { x.operators[1].sheet.currentTime = 0; return x.operators[1].sheet.sum('UltimateEfficiency'); })(r), 0.07);
   r = crew([me('Gilberta', { startUltimateEnergy: 90 })]);
   r.run([script(0, function* (a) { a.applyVulnerable(2); }), step(0, 'Ultimate')]);
@@ -303,7 +303,7 @@
   r = crew([me('Liino', { startUltimateEnergy: 160 }), me('Perlica')]);
   r.run([step(0, 'Ultimate'), script(1, function* (a) { a.applyReaction('Electric', 1); }, { extraDelay: 1.5 }), step(0, 'ComboSkill')]);
   check('Liino: combo does not trigger during Cosmovoice (window warning)', warned(r, /window/), 1);
-  check('Liino ult: Stage Pyrotechnics at 0.5s and Extravaganza at 1.0s', r.damageLog.filter((h) => h.category === 'Ultimate').slice(0, 2).map((h) => h.time).join() === '0.5,1' ? 1 : 0, 1);
+  check('Liino ult: Stage Pyrotechnics at 0s and Extravaganza at 0.5s (hit at the start of each slice)', r.damageLog.filter((h) => h.category === 'Ultimate').slice(0, 2).map((h) => h.time).join() === '0,0.5' ? 1 : 0, 1);
   r = crew([me('Perlica')]);
   r.run([script(0, function* (a) { a.applyVulnerable(1); }), ...basicAttacks(0, 4), step(0, 'ComboSkill')]);
   check('Perlica: Cycle Protocol never chains with a single enemy', r.damageLog.filter((h) => h.category === 'ComboSkill').length, 1);
@@ -311,7 +311,7 @@
   r.run([script(0, function* (a) { a.applyVulnerable(2); }), step(0, 'Ultimate')]);
   check('Gilberta ult: Susceptibility is dynamic and ends with the 5s field', r.enemy.status.modifiers(2).length * 10 + r.enemy.status.modifiers(6.01).filter((m) => m.stat === 'Susceptibility').length, 10);
   r = crew([me('Gilberta')]); r.run([step(0, 'BattleSkill')]);
-  check('Gilberta BS: two hits, each at the end of a 0.5s slice', r.damageLog.map((h) => h.time).join() === '0.5,1' ? 1 : 0, 1);
+  check('Gilberta BS: two hits, each at the start of a 0.5s slice', r.damageLog.map((h) => h.time).join() === '0,0.5' ? 1 : 0, 1);
   const setRun = (setName, entries, members = 1) => crew([me('ZhuangFangyi', { gearPieces: set3(setName) }), ...(members > 1 ? [me('Perlica')] : [])]);
   const firstBattleSkillGroup = (setName, withCombo) => {
     const run = setRun(setName);
@@ -370,6 +370,24 @@
   view = B.simulate(state);
   check('builder: Dive by a non-controlled operator is reported invalid', view.rows[6].record.invalid ? 1 : 0, 1);
   check('builder: HP follows 5 x STR', Math.round(B.slotStats(B.defaultState().team[0]).HP), Math.round(5495 + 5 * B.slotStats(B.defaultState().team[0]).STR));
+
+  // Sequencing fixes: effects resolve at cast start, persistence, team effects, labels, controlled operator
+  r = crew([me('ZhuangFangyi'), me('Perlica')]);
+  r.run([...basicAttacks(0, 5), step(1, 'ComboSkill')]);
+  check('sequencing: Perlica combo right after Fangyi Final Strike needs no padding (no warning)', warned(r, /combo/), 0);
+  check('sequencing: Perlica combo starts at the Final Strike BATK start (4s), not after it', r.timeline[5].start, 4);
+  r = crew([me('ZhuangFangyi', { startUltimateEnergy: 240 }), me('Perlica')]);
+  r.run([step(0, 'Ultimate'), ...basicAttacks(0, 3), step(1, 'ComboSkill')]);
+  check('sequencing: also in Fangyi ult form (3rd attack is the Final Strike)', warned(r, /combo/), 0);
+  check('class: Fangyi is a Striker (no Messenger\'s Song efficiency)', ((x) => { x.run([]); const f = x.operators[1], p = x.operators[2]; f.sheet.currentTime = 0; p.sheet.currentTime = 0; return Math.round(f.sheet.sum('UltimateEfficiency') * 100) * 100 + Math.round(p.sheet.sum('UltimateEfficiency') * 100); })(crew([me('Gilberta'), me('ZhuangFangyi'), me('Perlica')])), 7);
+  state = B.defaultState(); state.team[1] = B.newSlot('Liino', '', []); state.actions = [{ slot: 1, action: 'BattleSkill', extraDelay: 0 }, { slot: 1, action: 'BasicAttack', extraDelay: 0 }, { slot: 1, action: 'BattleSkill', extraDelay: 0 }];
+  view = B.simulate(state);
+  check('builder: team buffs show in the Team column, not on the operator', view.rows[0].effects[4].some((e) => e.name === 'LiinoStanceAttack') && !view.rows[0].effects[1].some((e) => e.name === 'LiinoStanceAttack') ? 1 : 0, 1);
+  check('builder: effects persist on later rows while active', view.rows[1].effects[4].some((e) => e.name === 'LiinoStanceAttack' && !e.ended) ? 1 : 0, 1);
+  check('builder: End Stance row shows the stance as ended', view.rows[2].effects[1].some((e) => e.name === 'Vocalist Stance' && e.ended) && view.rows[2].label === 'End Stance' ? 1 : 0, 1);
+  view = B.simulate(B.defaultState());
+  check('builder: Force of Nature stays listed on the last row', view.rows[5].effects[0].some((e) => e.name === 'ForceOfNature' && !e.ended) ? 1 : 0, 1);
+  check('builder: BATK labels (BATK 1 ... BATK 3)', same(view.rows[1].label + '|' + view.rows[3].label, 'BATK 1|BATK 3'), 1);
 
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,

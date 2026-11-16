@@ -13,13 +13,13 @@
   // =============================== Zhuang Fangyi ===============================
   const electricInflicted = ({ simulation }) => enemyInflictionElement(simulation) === 'Electric';
   operators.ZhuangFangyi = {
-    ultimateEnergyCost: 240, name: 'Zhuang Fangyi', class: 'Caster', element: 'Electric', weaponType: 'Arts Unit', mainAttribute: 'WIL', secondaryAttribute: 'INT', verified: false,
+    ultimateEnergyCost: 240, name: 'Zhuang Fangyi', class: 'Striker', element: 'Electric', weaponType: 'Arts Unit', mainAttribute: 'WIL', secondaryAttribute: 'INT', verified: false,
     baseStats: { HP: 5495, ATK: 326, STR: 99, AGL: 99, INT: 123, WIL: 184 },
     passives: [{ name: 'Talent: WIL +60', modifiers: [mod('WIL', 60)] }, P(2, mod('WIL', 20), mod('DamageBonus', 0.15, ['BattleSkill'])), P(4, mod('UltimateEnergyCost', -0.15))],
     kit: {
       basicAttackElement: 'Electric',
       basicAttackSequence: batk([0.36, 0.54, 0.72, 1.01, 1.08], 18),
-      forms: { Empyrean: { basicAttackSequence: batk([1.5, 2.1, 3.0], 18), disablesFinisher: true } },
+      forms: { Empyrean: { label: 'ULT', basicAttackSequence: batk([1.5, 2.1, 3.0], 18), disablesFinisher: true } },
       battleSkill: {
         *run(ability) {
           const operator = ability.operator, ultimateActive = operator.inForm('Empyrean', ability.now), potential = ability.potential;
@@ -36,9 +36,9 @@
           applyForceOfNature(0.18);
           const sunderbladeCount = ability.team.countStacks('Sunderblade', ability.now);
           ability.lockFor(ultimateActive ? 0.3 : 0.3 + 0.1 * sunderbladeCount);
-          yield ability.wait(0.3);
-          for (let hitNumber = 1; hitNumber <= sunderbladeCount; hitNumber++) {
-            yield ability.wait(0.1);
+          ability.setLabel(ultimateActive ? (free ? 'ULT Battle Skill (free)' : 'ULT Battle Skill') : 'Battle Skill');
+          for (let hitNumber = 1; hitNumber <= sunderbladeCount; hitNumber++) { // everything resolves at cast start; the hits are 0.1s apart
+            if (hitNumber > 1) yield ability.wait(0.1);
             applyForceOfNature(operator.effects.ForceOfNature.state.value + 0.02); // measured: +2% applies before the hit's damage
             const base = ultimateActive ? 0.81 + 0.18 * consumedElectrificationLevel : 0.45 + 0.09 * consumedElectrificationLevel;
             ability.hit({ element: 'Electric', category: 'BattleSkill', multiplier: base * (hitNumber === sunderbladeCount ? 6 : 1) * (potential >= 1 ? 1.15 : 1) });
@@ -53,7 +53,7 @@
         windowTriggers: [{ on: 'FinalStrike', when: electricInflicted }, { on: 'Finisher', when: electricInflicted }],
         *run(ability) {
           const ultimateActive = ability.operator.inForm('Empyrean', ability.now);
-          ability.lockFor(0.5); yield ability.wait(0.5);
+          ability.lockFor(0.5);
           ability.hit({ element: 'Electric', category: 'ComboSkill', multiplier: ultimateActive ? 5.4 : 3.6 });
           ability.dealStagger(10);
           const consumedStacks = ability.consumeInfliction('Electric');
@@ -87,7 +87,7 @@
       basicAttackElement: 'Electric',
       basicAttackSequence: batk([0.57, 0.68, 0.84, 1.27], 15),
       battleSkill: { *run(ability) {
-        ability.spendSkillPoints(100); yield ability.wait(1);
+        ability.spendSkillPoints(100);
         ability.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 4.0 });
         ability.applyInfliction('Electric', 1); ability.dealStagger(10);
       } },
@@ -95,7 +95,7 @@
         cooldown: 19, windowTriggers: [{ on: 'FinalStrike' }], // any controlled operator's Final Strike
         *run(ability) {
           const potential = ability.potential;
-          yield ability.wait(1);
+
           // measured order: the forced Electrification (level 1, no initial hit) and everything it triggers come BEFORE the damage
           ability.applyReaction('Electric', 1, { duration: 5 * (potential >= 1 ? 1.75 : 1), debuffScale: potential >= 4 ? 1.33 : 1 });
           ability.hit({ element: 'Electric', category: 'ComboSkill', multiplier: 1.8 }); // Cycle Protocol never chains with a single enemy
@@ -104,7 +104,7 @@
         },
       },
       ultimate: { *run(ability) {
-        ability.spendUltimateEnergy(80); yield ability.wait(1);
+        ability.spendUltimateEnergy(80);
         ability.hit({ element: 'Electric', category: 'Ultimate', multiplier: 10.0, extraCriticalRate: ability.potential >= 5 ? 0.30 : 0 });
         ability.dealStagger(20);
       } },
@@ -116,13 +116,17 @@
   const vocalistActive = (operator, now) => stanceActive(operator, now) && operator.stance.name === 'Vocalist'; // combo does not trigger in Cosmovoice
   const endStance = (ability) => {
     const operator = ability.operator;
-    if (operator.stance) operator.stance.ended = true;
+    if (operator.stance) {
+      operator.stance.ended = true; ability.simulation.endEffect(operator.stance.record);
+      for (const name of ['LiinoStanceAttack', 'LiinoCosmovoiceAmp']) ability.simulation.endEffectsNamed('Team', name);
+    }
     operator.stance = null;
     for (const member of ability.simulation.operators) for (const name of ['LiinoStanceAttack', 'LiinoCosmovoiceAmp']) { member.sheet.removeModifiersFrom('effect:' + name); delete member.effects[name]; }
   };
   const startStance = (ability, name, duration, effects) => {
     endStance(ability);
     const stance = { name, until: ability.now + duration, ended: false };
+    stance.record = ability.simulation.logEffect(ability.operator.name, name + ' Stance', { end: stance.until });
     ability.operator.stance = stance;
     for (const [effectName, mods] of effects) ability.simulation.giveEffect(give('team', effectName, mods, duration), { owner: ability.operator, now: ability.now, event: {} });
     return stance;
@@ -139,11 +143,11 @@
       basicAttackSequence: batk([0.42, 0.60, 0.60, 0.81, 1.00], 19),
       battleSkill: { *run(ability) {
         const operator = ability.operator, potential = ability.potential, scale = potential >= 5 ? 1.2 : 1;
-        if (operator.stance) { endStance(ability); return; } // "End Stance": free (the short cooldown is ignored)
+        if (operator.stance) { endStance(ability); ability.setLabel('End Stance'); return; } // "End Stance": free (the short cooldown is ignored)
         ability.spendSkillPoints(25);
         if (potential >= 1 && !operator.flags.firstBattleSkillDone) ability.returnSkillPoints(25);
         operator.flags.firstBattleSkillDone = true;
-        yield ability.wait(1);
+
         ability.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 2.4 * scale }); ability.dealStagger(3);
         const stance = startStance(ability, 'Vocalist', 60, [['LiinoStanceAttack', [atk(0.10 + (potential >= 1 ? 0.06 : 0))]]]);
         ability.background((function* () { // Additional ATK every 10s (assumed: first at +10s, category BattleSkill)
@@ -158,7 +162,7 @@
         cooldown: 8,
         windowTriggers: [{ on: 'ReactionApplied', when: ({ owner, now }) => vocalistActive(owner, now) }, { on: 'ReactionConsumed', when: ({ owner, now }) => vocalistActive(owner, now) }],
         *run(ability) {
-          yield ability.wait(1);
+
           ability.hit({ element: 'Electric', category: 'ComboSkill', multiplier: 3.6 * (ability.potential >= 3 ? 1.4 : 1) });
           ability.dealStagger(5); ability.gainUltimateEnergy(20);
           ability.grantTreatment([ability.simulation.controlled]);
@@ -167,7 +171,7 @@
       },
       ultimate: { *run(ability) {
         const potential = ability.potential, scale = potential >= 5 ? 1.2 : 1;
-        ability.spendUltimateEnergy(160); yield ability.wait(0.5); // two hits: 1s split into equal slices, each hit at the end of its slice
+        ability.spendUltimateEnergy(160); // two hits: the 1s is split into 2 slices, each hit at the start of its slice
         ability.grantTreatment();
         const amp = Math.min(0.60, 0.0004 * ability.operator.sheet.attribute('WIL')) * (potential >= 5 ? 1.2 : 1); // Amp from Will (assumed no base value)
         const stance = startStance(ability, 'Cosmovoice', 15, [['LiinoStanceAttack', [atk(0.10 + (potential >= 1 ? 0.06 : 0))]], ['LiinoCosmovoiceAmp', [mod('Amp', amp, ['Electric']), mod('Amp', amp, ['Nature'])]]]);
@@ -214,7 +218,8 @@
       basicAttackSequence: batk([0.42, 0.48, 0.75, 0.80, 1.06], 17),
       battleSkill: { *run(ability) {
         const operator = ability.operator, mode = arcaneMode(operator), potential = ability.potential;
-        ability.spendSkillPoints(100); yield ability.wait(1);
+        ability.spendSkillPoints(100);
+        ability.setLabel('Battle Skill (' + mode + ')');
         ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: mode === 'INT' ? 5.0 : 3.0 });
         ability.applyInfliction('Nature', 1); ability.dealStagger(10);
         if (mode === 'INT' && ability.enemy.status.isImprisoned(ability.now)) { // INT array: hitting an imprisoned enemy
@@ -232,7 +237,7 @@
           { on: 'InflictionBatch', when: ({ owner }) => arcaneMode(owner) === 'WIL' }],
         *run(ability) {
           const operator = ability.operator, mode = arcaneMode(operator), potential = ability.potential;
-          yield ability.wait(1);
+
           // measured order: Susceptibility (+ its weapon triggers) -> initial hit -> infliction/Burst -> Imprisonment ... Explosion when it ends
           const willBonus = Math.min(0.08, (0.08 * operator.sheet.attribute('WIL')) / 640);
           const susceptibility = mode === 'INT' ? 0.04 : 0.04 + willBonus + (potential >= 1 ? 0.06 : 0);
@@ -249,12 +254,13 @@
         const operator = ability.operator, mode = arcaneMode(operator), potential = ability.potential;
         const array = operator.array && operator.array.until > ability.now ? operator.array : null;
         if (array && array.arcanaReady) { // Gloompurge Arcana: the ultimate switches after 2 Cluster Strikes (assumed free)
-          yield ability.wait(1);
+          ability.setLabel('Gloompurge Arcana');
+
           ability.hit({ element: 'Nature', category: 'Ultimate', multiplier: mode === 'INT' ? 14.4 * (potential >= 5 ? 1.3 : 1) : 3.6 });
-          ability.dealStagger(10); willSusceptibility(ability); operator.array = null;
+          ability.dealStagger(10); willSusceptibility(ability); ability.endState(operator.array.record); operator.array = null;
           return;
         }
-        ability.spendUltimateEnergy(100); yield ability.wait(1);
+        ability.spendUltimateEnergy(100);
         ability.hit({ element: 'Nature', category: 'Ultimate', multiplier: 1.8 }); ability.dealStagger(10);
         if (mode === 'INT') {
           ability.applyReaction('Nature', 1); // forced Corrosion (assumed level 1; Weapon Honing applies via reactionOptions)
@@ -263,7 +269,7 @@
           const element = enemyInflictionElement(ability.simulation); if (element) ability.applyInfliction(element, 1);
           willSusceptibility(ability);
         }
-        operator.array = { until: ability.now + 20, strikes: 0, arcanaReady: false };
+        operator.array = { until: ability.now + 20, strikes: 0, arcanaReady: false, record: ability.trackState('Gloompurge Array', 20) };
       } },
     },
   };
@@ -274,15 +280,13 @@
     baseStats: { HP: 5495, ATK: 329, STR: 89, AGL: 92, INT: 127, WIL: 171 },
     passives: [{ name: 'Stalwart: WIL +60', modifiers: [mod('WIL', 60)] }, P(4, mod('UltimateEnergyCost', -0.15))],
     triggers: [{ on: 'BattleStart', // Messenger's Song: guards, casters and supporters gain Ultimate Efficiency +7% (+5% at P3)
-      apply: ({ owner, simulation, now }) => {
-        for (const member of simulation.operators) if (['Guard', 'Caster', 'Supporter'].includes(member.definition.class)) member.setEffect('MessengersSong', [mod('UltimateEfficiency', 0.07 + (owner.potential >= 3 ? 0.05 : 0))], Infinity, now, {});
-      } }],
+      give: give('classes', 'MessengersSong', ({ owner }) => [mod('UltimateEfficiency', 0.07 + (owner.potential >= 3 ? 0.05 : 0))], Infinity, { classes: ['Guard', 'Caster', 'Supporter'] }) }],
     kit: {
       basicAttackElement: 'Nature',
       basicAttackSequence: batk([0.68, 0.81, 0.91, 1.12], 16),
       battleSkill: { *run(ability) {
-        ability.spendSkillPoints(100); yield ability.wait(0.5);
-        ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: 2.19 }); // gravity pull (1s split into 2 slices)
+        ability.spendSkillPoints(100);
+        ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: 2.19 }); // gravity pull (1s split into 2 slices, each hit at the start of its slice)
         yield ability.wait(0.5);
         ability.hit({ element: 'Nature', category: 'BattleSkill', multiplier: 1.3 }); // explosion
         ability.applyInfliction('Nature', 1); ability.dealStagger(10);
@@ -290,7 +294,7 @@
       comboSkill: {
         cooldown: 19, windowTriggers: [{ on: 'ReactionApplied' }],
         *run(ability) {
-          yield ability.wait(1);
+
           ability.hit({ element: 'Nature', category: 'ComboSkill', multiplier: 3.15 * (ability.potential >= 5 ? 1.3 : 1) });
           ability.dealStagger(5);
           ability.applyPhysicalStatus('Lift', { forced: true });
@@ -299,7 +303,7 @@
       },
       ultimate: { *run(ability) {
         const potential = ability.potential;
-        ability.spendUltimateEnergy(90); yield ability.wait(1);
+        ability.spendUltimateEnergy(90);
         ability.hit({ element: 'Nature', category: 'Ultimate', multiplier: 7.5 });
         ability.dealStagger(20); ability.applyInfliction('Nature', 1);
         // Arts Susceptibility follows the Vulnerable stacks while the enemy is in the 5s field (re-evaluated per hit)
@@ -320,16 +324,16 @@
       battleSkill: { *run(ability) { // Qingbo Triplex: move 1 Cloudtrapper -> 2 Trail and Mangle -> (3+ Vulnerable consumed) 3 World Splitter
         const operator = ability.operator, scale = ability.potential >= 5 ? 1.1 : 1, move = operator.flags.battleSkillMove || 1;
         if (move === 1) {
-          ability.spendSkillPoints(100); ability.returnSkillPoints(50); yield ability.wait(1);
+          ability.setLabel('Battle Skill 1: Cloudtrapper'); ability.spendSkillPoints(100); ability.returnSkillPoints(50);
           ability.hit({ element: 'Physical', category: 'BattleSkill', multiplier: 1.5 * scale });
           operator.flags.battleSkillMove = 2;
         } else if (move === 2) {
-          ability.spendSkillPoints(50); yield ability.wait(1);
+          ability.setLabel('Battle Skill 2: Trail and Mangle'); ability.spendSkillPoints(50);
           ability.hit({ element: 'Physical', category: 'BattleSkill', multiplier: 2.0 * scale }); ability.dealStagger(5);
           const crush = ability.applyPhysicalStatus('Crush');
           operator.flags.battleSkillMove = crush.effective && crush.stacksConsumed >= 3 ? 3 : 1;
         } else {
-          ability.spendSkillPoints(50); yield ability.wait(1);
+          ability.setLabel('Battle Skill 3: World Splitter'); ability.spendSkillPoints(50);
           const boosted = ability.enemy.status.hasSusceptibility('Physical', ability.now) || ability.enemy.isStaggered(ability.now); // Stern Crackdown
           ability.hit({ element: 'Physical', category: 'Status', subtype: 'PhysicalStatus', statusKind: 'PhysicalStatus', multiplier: 6.0 * scale * (boosted ? 1.2 : 1) }); // counts as Crush damage
           ability.dealStagger(10);
@@ -340,7 +344,7 @@
         cooldown: 19, windowTriggers: [{ on: 'VulnerableApplied', when: (context) => vulnerableStacksAfter(context) >= 3 }],
         *run(ability) {
           const operator = ability.operator, potential = ability.potential;
-          yield ability.wait(1);
+
           ability.hit({ element: 'Physical', category: 'ComboSkill', multiplier: 2.5 }); ability.dealStagger(10);
           ability.applySusceptibility('Physical', 0.05 + (potential >= 1 ? 0.05 : 0), 16 + (potential >= 1 ? 4 : 0));
           operator.flags.battleSkillMove = 2; ability.gainUltimateEnergy(10);
@@ -352,7 +356,7 @@
         },
       },
       ultimate: { *run(ability) {
-        ability.spendUltimateEnergy(80); yield ability.wait(1);
+        ability.spendUltimateEnergy(80);
         ability.applyPhysicalStatus('Lift', { forced: true });
         ability.hit({ element: 'Physical', category: 'Ultimate', multiplier: 7.0 });
         ability.dealStagger(20 + (ability.potential >= 5 ? 5 : 0));

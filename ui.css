@@ -31,3 +31,8 @@ select { min-width: 0; max-width: 100%; } input[type=number] { width: 54px; }
 .icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; font-size: 9px; font-weight: 700; color: #fff; text-shadow: 0 0 2px #000; border: 1px solid rgba(255,255,255,.18); cursor: help; overflow: hidden; }
 .icon img { width: 100%; height: 100%; object-fit: cover; }
 .err { color: var(--bad); padding: 8px; white-space: pre-wrap; }
+
+.cell.ctl { box-shadow: inset 3px 0 0 var(--good); background: rgba(123, 224, 168, .07); }
+.icon { position: relative; } .icon.ended { opacity: .4; border-style: dashed; }
+.icon .n { position: absolute; right: -1px; bottom: -1px; background: rgba(0, 0, 0, .65); font-style: normal; font-size: 8px; line-height: 1; padding: 0 1px; }
+.stats .tag { color: var(--good); font-size: 10px; } .field span.dim { flex: 1; min-width: 0; }

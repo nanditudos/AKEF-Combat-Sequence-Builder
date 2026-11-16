@@ -9,15 +9,18 @@
   // Armed stacks are held (inactive) until a matching skill is cast; active for that cast only.
   operatorMethods.addArmedStacks = function (name, count, { modifiers, duration, maxStacks, armedFor }, now) {
     this.armed = this.armed || {};
-    if (this.simulation) this.simulation.logEffect(this.name, name, 'armed');
     const group = (this.armed[name] = this.armed[name] || { armedFor, modifiers, stacks: [] });
     group.modifiers = modifiers; group.stacks = group.stacks.filter((stack) => stack.expires > now);
-    for (let i = 0; i < count; i++) { if (group.stacks.length >= maxStacks) group.stacks.shift(); group.stacks.push({ expires: now + duration }); }
+    for (let i = 0; i < count; i++) {
+      if (group.stacks.length >= maxStacks) { const removed = group.stacks.shift(); if (this.simulation) this.simulation.endEffect(removed.record); }
+      const record = this.simulation && !this.simulation.suppressOperatorLog ? this.simulation.logEffect(this.name, name, { detail: 'armed', end: now + duration, stack: true }) : null;
+      group.stacks.push({ expires: now + duration, record });
+    }
   };
   operatorMethods.consumeStacks = function (name, count, now) {
     const stacks = (this.stacks[name] || []).filter((stack) => stack.expires > now);
     const taken = Math.min(count, stacks.length);
-    for (let i = 0; i < taken; i++) this.sheet.removeModifiersFrom(stacks.shift().source);
+    for (let i = 0; i < taken; i++) { const removed = stacks.shift(); this.sheet.removeModifiersFrom(removed.source); if (this.simulation) this.simulation.endEffect(removed.record); }
     this.stacks[name] = stacks;
     return taken;
   };
@@ -27,6 +30,7 @@
       if (!group.armedFor.includes(event.category)) continue;
       const live = group.stacks.filter((stack) => stack.expires > this.now);
       group.stacks = [];
+      for (const stack of live) this.endEffect(stack.record); // consumed by the cast
       live.forEach((stack, index) => {
         const source = `armed:${name}:${index}`;
         caster.sheet.addModifiers(group.modifiers, source);
@@ -50,7 +54,11 @@
       else operator.setEffect(spec.name, scaled, spec.duration, now, {});
     };
     const others = this.operators.filter((operator) => operator !== owner);
+    const teamScoped = ['team', 'others', 'selfAndOthers', 'otherElements', 'classes'].includes(spec.to); // shown once, as a team effect
+    const previousSuppress = this.suppressOperatorLog;
+    if (teamScoped) this.suppressOperatorLog = true;
     switch (spec.to) {
+      case 'classes': this.operators.filter((operator) => spec.classes.includes(operator.definition.class)).forEach((operator) => applyTo(operator)); break;
       case 'enemy': this.enemy.status.setEffect(spec.name, modifiers, spec.duration, now); break;
       case 'team': this.operators.forEach((operator) => applyTo(operator)); break;
       case 'others': others.forEach((operator) => applyTo(operator)); break;
@@ -58,6 +66,14 @@
       case 'otherElements': this.operators.filter((operator) => operator.definition.element !== owner.definition.element).forEach((operator) => applyTo(operator)); break;
       case 'targets': (context.event.targets || []).forEach((operator) => applyTo(operator)); break;
       default: applyTo(owner);
+    }
+    this.suppressOperatorLog = previousSuppress;
+    if (teamScoped) {
+      for (let i = 0; i < (spec.maxStacks ? count : 1); i++) this.logEffect('Team', spec.name, { detail: spec.to === 'team' ? '' : spec.to, end: now + spec.duration, stack: Boolean(spec.maxStacks) });
+      if (spec.maxStacks) {
+        const live = this.effectTimeline.filter((r) => r.target === 'Team' && r.name === spec.name && r.end > now);
+        while (live.length > spec.maxStacks) this.endEffect(live.shift());
+      }
     }
   };
 
