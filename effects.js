@@ -83,4 +83,19 @@
     intensity: (value) => E.mod('ArtsIntensity', value),
     give: (to, name, mods, duration, extra = {}) => ({ to, name, mods, duration, ...extra }),
   };
+
+  // A consumable shows each of its buffs as its own effect, like in game: "ATK", "Critical Rate", "All Attributes"...
+  const LABELS = { ATKBonus: 'ATK', ATK: 'ATK', CriticalRate: 'Critical Rate', CriticalDamage: 'Critical Damage', DamageBonus: 'DMG Dealt', UltimateEfficiency: 'Ultimate Gain Efficiency', DEFBonus: 'DEF', DEF: 'DEF',
+    FinalDamageReduction: 'DMG Reduction', TreatmentBonus: 'Treatment Bonus', TreatmentReceivedBonus: 'Treatment Received', ComboSkillCooldownReduction: 'Combo Skill Cooldown Reduction', HPBonus: 'HP' };
+  E.splitConsumable = (consumable) => {
+    const attributes = consumable.modifiers.filter((m) => ['STR', 'AGL', 'INT', 'WIL'].includes(m.stat)), groups = new Map();
+    for (const m of consumable.modifiers) {
+      let label = LABELS[m.stat] || m.stat;
+      if (['STR', 'AGL', 'INT', 'WIL'].includes(m.stat) && attributes.length === 4) label = 'All Attributes';
+      if (m.stat === 'DamageBonus' && m.tags) label = m.tags.join(' & ') + ' DMG Dealt';
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(m);
+    }
+    return [...groups].map(([label, modifiers]) => ({ name: `${consumable.name}: ${label}`, modifiers }));
+  };
 })();

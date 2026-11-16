@@ -50,3 +50,13 @@ aside { width: 250px; } aside hr { border: 0; border-top: 1px solid var(--line);
 .icon .n { font-size: 9px; font-weight: 700; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
 .stat-icon { height: 13px; width: auto; vertical-align: -2px; margin-right: 2px; }
 .field.wrap { flex-wrap: wrap; } .field label.radio { white-space: nowrap; }
+
+/* fixed layout: sidebar, summary, setup, stats and add rows stay in view; only the timeline scrolls */
+html, body { height: 100%; overflow: hidden; } #app { height: 100vh; min-height: 0; }
+aside { height: 100vh; overflow-y: auto; flex: none; }
+main { height: 100vh; display: flex; flex-direction: column; overflow-x: auto; overflow-y: hidden; }
+.summary { flex: none; }
+.board { min-width: 1120px; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.head { flex: none; max-height: 58vh; overflow-y: scroll; overflow-x: hidden; } /* scroll track kept so the columns line up with the timeline */
+.timeline { flex: 1; min-height: 120px; overflow-y: scroll; overflow-x: hidden; }
+.timeline .row:nth-child(even) { background: #110f19; }

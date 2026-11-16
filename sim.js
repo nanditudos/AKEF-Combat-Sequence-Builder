@@ -2,7 +2,7 @@
 // Not built yet: Combo/Ultimate/Finisher/Dive, time freeze, inflictions/reactions, triggers, crit counters.
 (function () {
   const E = globalThis.Endfield;
-  const MAX_SP = 300, SP_REGEN_PER_SECOND = 8, SWITCH_BACK_LOCK = 1, BASIC_ATTACK_RESET_GAP = 1, UE_PER_100_SP = 6.5, COMBO_WINDOW = 10, DEFAULT_ACTION_DURATION = 1, DEFAULT_DODGE_DURATION = 0.5;
+  const MAX_SP = 300, SP_REGEN_PER_SECOND = 8, SWITCH_BACK_LOCK = 1, BASIC_ATTACK_RESET_GAP = 1, UE_PER_100_SP = 6.5, COMBO_WINDOW = 10, DEFAULT_ACTION_DURATION = 1, DEFAULT_DODGE_DURATION = 0.5, ENEMY_CHARGE_TIME = 1, CHARGE_INTERRUPT_STAGGER = 20; // charge time and interrupt stagger are placeholders (not in the game data)
   const INSTANT_ACTIONS = ['Tactical', 'TakeDamage', 'EnemyCharge']; // no time, no lock
 
   class Team {
@@ -35,7 +35,7 @@
   }
 
   class EnemyState {
-    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; this.damageTaken = 0; }
+    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; this.damageTaken = 0; this.chargeUntil = -Infinity; }
     hpFraction() { return Math.max(0, 1 - this.damageTaken / this.data.hp); } // from the damage dealt so far
     finisherPending(time) { return this.isStaggered(time) && !this.finisherUsed; } // one Finisher per Staggered window
     isStaggered(time) { return time < this.staggeredUntil; }
@@ -231,6 +231,11 @@
         if (instance.category === 'BattleSkill' || instance.category === 'ComboSkill') advance('skill', 'skill');
       }
       this.enemy.damageTaken += result.damage;
+      if (['BattleSkill', 'ComboSkill', 'Ultimate'].includes(instance.category) && this.enemy.chargeUntil > this.now + this.virtualOffset) { // a skill hit interrupts the enemy's charge
+        this.enemy.chargeUntil = -Infinity; this.endEffect(this.enemy.chargeRecord);
+        if (source.dealStagger) source.dealStagger(CHARGE_INTERRUPT_STAGGER); else this.enemy.addStagger(CHARGE_INTERRUPT_STAGGER, this.now);
+        this.emit('EnemyChargeInterrupted', { source });
+      }
       this.emit('DamageDealt', { source, category: instance.category, subtype: instance.subtype, element: instance.element });
       return result.damage;
     }
@@ -305,7 +310,7 @@
     // actionList: [{ operator: index, action: 'BasicAttack'|'BattleSkill'|'ComboSkill'|'Ultimate'|'Finisher'|'DiveAttack'|'Switch'|'Custom', extraDelay? }]
     run(actionList) {
       let previousStart = 0;
-      for (const operator of this.operators) if (operator.consumable) operator.setEffect(operator.consumable.name, operator.consumable.modifiers, operator.consumable.duration, 0, {});
+      for (const operator of this.operators) if (operator.consumable) for (const part of E.splitConsumable(operator.consumable)) operator.setEffect(part.name, part.modifiers, operator.consumable.duration, 0, {});
       for (const operator of this.operators) this.emit('BattleStart', { source: { operator } });
       this.checkTacticals();
       actionList.forEach((entry, index) => {
@@ -408,7 +413,9 @@
         ability.setLabel(`${operator.name} takes damage` + (entry.hp !== undefined && entry.hp !== null ? ` (HP ${operator.hpPercent}%)` : ''));
         this.emit('OperatorAttacked', { source: ability, target: operator, hpBefore: before, hpAfter: operator.hpPercent, controlled: this.controlled === operator });
       } else if (entry.action === 'EnemyCharge') { // scripted: the enemy starts charging up a skill
-        ability.setLabel('Enemy starts charging a skill'); this.emit('EnemyChargeStart', { source: ability });
+        ability.setLabel('Enemy starts charging a skill'); this.enemy.chargeUntil = this.now + ENEMY_CHARGE_TIME;
+        this.enemy.chargeRecord = this.logEffect('Enemy', 'Charging', { end: this.enemy.chargeUntil });
+        this.emit('EnemyChargeStart', { source: ability });
       } else if (entry.action === 'PerfectDodge') { // +7.5 SP, the team's SP regeneration pauses for 0.5s; the dodge time is operator-dependent (kit.dodge.duration)
         ability.lockFor((kit.dodge && kit.dodge.duration) || DEFAULT_DODGE_DURATION); ability.setLabel('Perfect Dodge');
         ability.restoreSkillPoints(7.5);

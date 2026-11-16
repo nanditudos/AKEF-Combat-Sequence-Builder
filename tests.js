@@ -536,6 +536,20 @@ Endfield.testsDone = (async function () {
   r = estellaRun([step(0, 'BattleSkill')], { potential: 3 });
   check('Estella P3: Battle Skill 350% x1.4', r.damageLog.find((h) => h.category === 'BattleSkill').multiplier, 4.9, 1e-9);
 
+  // Enemy charge, consumable effects, fixed layout inputs
+  r = crew([me('ZhuangFangyi')]);
+  r.run([{ operator: 0, action: 'EnemyCharge' }, step(0, 'BattleSkill')]);
+  check('enemy charge: a Battle Skill hit interrupts it (+20 stagger on top of the skill\'s 15)', r.enemy.stagger, 35, 1e-9);
+  r = crew([me('ZhuangFangyi')]);
+  r.run([{ operator: 0, action: 'EnemyCharge' }, step(0, 'BattleSkill', { extraDelay: 1.5 })]);
+  check('enemy charge: lasts 1s, a later skill does not interrupt', r.enemy.stagger, 15, 1e-9);
+  r = crew([me('ZhuangFangyi')]);
+  r.run([{ operator: 0, action: 'EnemyCharge' }, step(0, 'BasicAttack')]);
+  check('enemy charge: a basic attack does not interrupt', r.enemy.stagger, 0, 1e-9);
+  r = crew([me('ZhuangFangyi', { consumable: d.consumables.GinsengMeatStew })]); r.run([]);
+  check('consumable: each buff is its own effect (ATK and Critical Rate)', same(r.effectTimeline.filter((e) => e.name.startsWith('Ginseng Meat Stew: ')).map((e) => e.name.split(': ')[1]).join(), 'ATK,Critical Rate'), 1);
+  check('builder: no manual Tactical button any more', B.ACTIONS.some(([action]) => action === 'Tactical') ? 0 : 1, 1);
+
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,
     gearPieces: [d.gear.byName('Xiranflow Light Armor'), d.gear.byName('Xiranflow Gloves'), d.gear.byName('Xiranflow Baton'), d.gear.byName('LYNX Slab')], setBonuses: d.gear.setBonuses });

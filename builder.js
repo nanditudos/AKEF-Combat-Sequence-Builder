@@ -2,7 +2,7 @@
 (function () {
   const E = globalThis.Endfield, D = E.data;
   const SLOT_KEYS = ['armor', 'gloves', 'kit1', 'kit2'];
-  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch'], ['Tactical', 'Tact.'], ['PerfectDodge', 'Dodge'], ['TakeDamage', 'Hit']]
+  const ACTIONS = [['BasicAttack', 'BATK'], ['BattleSkill', 'Battle'], ['ComboSkill', 'Combo'], ['Ultimate', 'Ult'], ['Finisher', 'Finish'], ['DiveAttack', 'Dive'], ['Switch', 'Switch'], ['PerfectDodge', 'Dodge'], ['TakeDamage', 'Hit']]
   const ENEMY_ACTIONS = [['EnemyCharge', 'Charge']];
   const COLUMNS = 6; // 4 operators, Team (+ battlefield), Enemy
 

@@ -17,6 +17,7 @@
     return B.defaultState();
   };
   let state = loadState();
+  let scrollToEnd = false; // after adding an action the timeline scrolls to its end
 
   const el = (tag, props = {}, ...children) => {
     const node = document.createElement(tag);
@@ -47,9 +48,11 @@
 
   // ---------- effect icons ----------
   const hue = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
-  const iconEl = (effect) => {
+  const ROMAN_EFFECTS = /Infliction|Vulnerable|Combustion|Electrification|Solidification|Corrosion|Crush|Breach|Shatter|Lifted|Knocked Down/; // only these use Roman numerals (enemy column)
+  const iconEl = (effect, enemyColumn = false) => {
     const custom = (E.icons || {})[effect.name], customIsImage = custom && /[\/.]/.test(custom);
-    const badge = effect.level ? E.roman(effect.level) : effect.count > 1 ? E.roman(effect.count) : ''; // levels and stack counts as Roman numerals
+    const numeral = (n) => (enemyColumn && ROMAN_EFFECTS.test(effect.name) ? E.roman(n) : String(n));
+    const badge = effect.level ? numeral(effect.level) : effect.count > 1 ? numeral(effect.count) : '';
     const title = effect.name + (effect.detail ? ' (' + effect.detail + ')' : '') + (badge ? ' ' + badge : '') + (effect.ended ? ' — ends / consumed on this row' : '');
     const box = el('span', { class: 'icon' + (effect.ended ? ' ended' : ''), title });
     const glyph = el('span', { class: 'glyph' }, (!customIsImage && custom) || effect.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2));
@@ -153,7 +156,7 @@
     for (let column = 0; column < B.COLUMNS; column++) {
       const cell = el('div', { class: 'cell ' + COLUMN_CLASS[column] + (column === row.controlled ? ' ctl' : '') });
       if (column === row.entry.slot) cell.append(chip(row));
-      if (row.effects[column].length) cell.append(el('div', { class: 'icons' }, row.effects[column].map(iconEl)));
+      if (row.effects[column].length) cell.append(el('div', { class: 'icons' }, row.effects[column].map((effect) => iconEl(effect, column === 5))));
       cells.push(cell);
     }
     return el('div', { class: 'row' + (row.record && row.record.invalid ? ' invalid' : '') }, cells);
@@ -164,11 +167,11 @@
       const cell = el('div', { class: 'cell ' + COLUMN_CLASS[column] });
       if (column < 4) {
         const bar = el('div', { class: 'adds' });
-        for (const [action, label] of B.ACTIONS) bar.append(el('button', { disabled: !state.team[column].op, title: action, onclick: () => update(() => { state.actions.push({ slot: column, action, extraDelay: 0 }); }) }, label));
+        for (const [action, label] of B.ACTIONS) bar.append(el('button', { disabled: !state.team[column].op, title: action, onclick: () => update(() => { scrollToEnd = true; state.actions.push({ slot: column, action, extraDelay: 0 }); }) }, label));
         cell.append(bar);
       } else if (column === 5) { // scenario events of the enemy
         const bar = el('div', { class: 'adds' });
-        for (const [action, label] of B.ENEMY_ACTIONS) bar.append(el('button', { disabled: !state.team.some((slot) => slot.op), title: 'Enemy starts charging a skill', onclick: () => update(() => { state.actions.push({ slot: 5, action, extraDelay: 0 }); }) }, label));
+        for (const [action, label] of B.ENEMY_ACTIONS) bar.append(el('button', { disabled: !state.team.some((slot) => slot.op), title: 'Enemy starts charging a skill', onclick: () => update(() => { scrollToEnd = true; state.actions.push({ slot: 5, action, extraDelay: 0 }); }) }, label));
         cell.append(bar);
       }
       cells.push(cell);
@@ -230,11 +233,13 @@
     el('button', { onclick: () => { state = B.defaultState(); render(); } }, 'Reset all'));
 
   function render() {
-    const view = B.simulate(state), grid = el('div', { class: 'grid' });
+    const view = B.simulate(state), previous = document.querySelector('.timeline'), keepTop = previous ? previous.scrollTop : 0;
     const settings = [el('div', { class: 'cell gut' }, 'setup'), ...[0, 1, 2, 3].map(slotSettings), teamSettings(), enemySettings()];
     const stats = [el('div', { class: 'cell gut' }, 'stats'), ...[0, 1, 2, 3].map((i) => slotStatsCell(i, view)), teamStatsCell(view), enemyStatsCell(view)];
-    grid.append(el('div', { class: 'row settings' }, settings), el('div', { class: 'row stats' }, stats), addBar(), el('div', { class: 'rows', style: 'display: contents' }, view.rows.map(timelineRow)));
-    document.getElementById('app').replaceChildren(sidebar(), el('main', {}, summary(view), grid));
+    const head = el('div', { class: 'head' }, el('div', { class: 'row settings' }, settings), el('div', { class: 'row stats' }, stats), addBar());
+    const timeline = el('div', { class: 'timeline' }, view.rows.map(timelineRow));
+    document.getElementById('app').replaceChildren(sidebar(), el('main', {}, summary(view), el('div', { class: 'board' }, head, timeline)));
+    timeline.scrollTop = scrollToEnd ? timeline.scrollHeight : keepTop; scrollToEnd = false;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
   }
   render();
