@@ -151,3 +151,22 @@ Add checks to `tests.js` (search for "Estella" to see the pattern). The helpers 
 - No HP: use the Take Damage action (`OperatorAttacked`) for "when attacked" talents; healing and shields are ignored (but `grantTreatment` fires the event weapons need).
 - Combo cooldowns are informational. One enemy only: "per enemy" effects count one.
 - Tell me when you need something the list above does not cover (a new status, an event, a stat): that is an engine change, which I will make.
+
+
+## 10. Addendum: answers to common operator problems
+- **Flat damage** (not scaling with ATK): `ability.hit({ element: 'Physical', category: 'BattleSkill', flatDamage: 300 + 5 * def })`. Bonuses, crit, DEF and resistance still apply; ATK and `multiplier` do not.
+- **Stats derived from other stats** (Catcher: DEF = 0.12 x live WIL): add `derived: { DEF: (sheet) => sheet.attribute('WIL') * 0.12 }` to the operator, then use `ability.operator.sheet.defense()` (it includes base DEF, gear DEF, DEF%, and the derived part).
+- **Effects on the controlled operator**: `give('controlled', ...)` in `giveEffect`/triggers (also `'nonControlled'`), or from a script `ability.applyEffectTo(ability.controlledOperator(), name, modifiers, duration, state)`. Any other operator: `ability.applyEffectTo(operatorObject, ...)`; end early with `ability.removeEffect(operatorObject, name)`.
+- **Protected / Shield**: `ability.applyProtection(target, 0.9, 3)` applies 'Protected' and fires `ProtectionApplied`; `ability.grantShield(target, amount, duration)` applies 'Shield' and fires `ShieldApplied` `{ target, amount }`. Nothing is absorbed (no HP model).
+- **Enemy dies**: the event `EnemyDefeated` (once, when the damage dealt reaches the enemy HP). `{ on: 'EnemyDefeated', apply: ... }`; `simulation.enemy.hpFraction()` gives the remaining fraction.
+- **Named enemy effects** (Focus): create with `ability.applyEnemyEffect(name, modifiers, duration, ['Heat'])` or the value-over-time form `ability.applyDynamicEnemyEffect(name, duration, (time) => [...modifiers], ['Heat'])` (the last argument lists the susceptibility elements to announce). Check with `simulation.enemy.status.hasEffect('Focus', now)` in `when`. Antal P5 pattern: `const started = ability.now; ... (time) => [{ stat: 'Susceptibility', value: 0.1 + (ability.potential >= 5 && time - started >= 20 ? 0.04 : 0), tags: ['Heat'] }, ...]`.
+- **Which effect opened the combo** (Antal): put a `capture` on each window trigger, read it in the combo:
+  `windowTriggers: [{ on: 'InflictionBatch', when: focused, capture: ({ event }) => ({ element: event.element }) }, { on: 'PhysicalStatusApplied', when: focused, capture: ({ event }) => ({ kind: event.kind }) }]` and in `run`: `const c = ability.operator.comboCapture;`.
+- **Per-operator cooldowns** in triggers: add `cooldownKey: ({ event }) => event.source.operator.name` next to `cooldown`. Antal's healing talent: `{ on: 'DamageDealt', by: 'any', cooldown: 30, cooldownKey: ({ event }) => event.source.operator.name, when: ({ event, now }) => { const o = event.source.operator; o.sheet.currentTime = now; return o.sheet.sum('Amp') > 0; }, apply: ({ event }) => event.source.operator ... simulation.contextFor(owner, 'BattleSkill').grantTreatment([event.source.operator]) }`.
+- **Combo cooldown reductions** (Fluorite P5): cooldowns are not simulated, so nothing has to be written (leave a comment).
+
+## 11. Timing: what happens when
+- A skill script runs from the cast start. Statements run immediately until the first `yield ability.wait(s)`; after the wait they run s seconds later, at that real time, and their effects are applied at that time. `yield ability.wait()` in the main script is fine; `ability.background(...)` is only needed for work that must outlive the skill's own end (periodic ticks).
+- `ability.advance(s)` is different: it does NOT wait. It only stamps the following hits with a later time while everything still resolves at the cast start. Use it only if you want that (the damage log shows the later time, effects are not delayed).
+- Link stacks are read at the cast start and consumed when the first synchronous part of the script ends, so an ability with waits consumes them at cast start.
+- A row shows an effect only if the effect exists at the row's time.

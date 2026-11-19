@@ -53,8 +53,8 @@
     const ignoreResistance = Endfield.sumModifiers(attacker.modifiers, 'IgnoreResistance', tags);
     const linkTable = LINK_BONUS[instance.category];
     const factors = {
-      attack: attacker.attack,
-      baseMultiplier: instance.multiplier,
+      attack: instance.flatDamage !== undefined ? 1 : attacker.attack, // flatDamage: a fixed amount that does not scale with ATK (all other factors still apply)
+      baseMultiplier: instance.flatDamage !== undefined ? instance.flatDamage : instance.multiplier,
       statusScaling: statusScaling(instance.statusKind, attacker.level, attacker.artsIntensity),
       multiplierGroup: 1 + sumAttacker('DamageBonus'),
       critical: canCritical ? criticalMultiplier(criticalMode, Math.min(1, attacker.criticalRate + (instance.extraCriticalRate || 0)), attacker.criticalDamage) : 1,

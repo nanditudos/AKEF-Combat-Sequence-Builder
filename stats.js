@@ -25,8 +25,8 @@
   }
 
   class StatSheet {
-    constructor({ baseStats, mainAttribute, secondaryAttribute, weaponAttack = 0, level = 90 }) {
-      Object.assign(this, { baseStats, mainAttribute, secondaryAttribute, weaponAttack, level });
+    constructor({ baseStats, mainAttribute, secondaryAttribute, weaponAttack = 0, level = 90, derived = {} }) {
+      Object.assign(this, { baseStats, mainAttribute, secondaryAttribute, weaponAttack, level, derived }); // derived: { DEF: (sheet) => extra value from live stats }
       this.modifiers = [];
       this.currentTime = 0; // modifiers with `expires` <= currentTime are inactive
     }
@@ -68,7 +68,7 @@
         attackBeforeAttributes: baseAttack * (1 + atkBonusSum) + flatAtk, attack: this.attack(),
       };
     }
-    defense() { return ((this.baseStats.DEF || 0) + this.sum('DEF')) * (1 + this.sum('DEFBonus')); }
+    defense() { return ((this.baseStats.DEF || 0) + this.sum('DEF') + (this.derived.DEF ? this.derived.DEF(this) : 0)) * (1 + this.sum('DEFBonus')); }
     criticalRate() { return Math.min(1, Math.max(0, 0.05 + this.sum('CriticalRate'))); }
     criticalDamage() { return 0.5 + this.sum('CriticalDamage'); }
     artsIntensity() { return this.sum('ArtsIntensity'); }
@@ -88,7 +88,7 @@
   function buildStatSheet({ operator, potential = 0, weapon, gearPieces = [], setBonuses = {} }) {
     const sheet = new StatSheet({
       baseStats: operator.baseStats, mainAttribute: operator.mainAttribute,
-      secondaryAttribute: operator.secondaryAttribute, weaponAttack: weapon ? weapon.baseAttack : 0,
+      secondaryAttribute: operator.secondaryAttribute, weaponAttack: weapon ? weapon.baseAttack : 0, derived: operator.derived,
     });
     for (const passive of operator.passives || []) {
       if (passive.condition || (passive.minPotential || 0) > potential) continue;

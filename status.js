@@ -14,7 +14,7 @@
       this.dynamicEffects = {}; // name -> { expires, compute(time) -> modifiers }
     }
     setEffect(name, modifiers, duration, now) { this.effects[name] = { modifiers, expires: now + duration }; if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name, { end: now + duration, icon: E.iconForModifiers(modifiers) }); }
-    setDynamicEffect(name, duration, compute) { if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name, { end: this.sim.now + duration }); this.dynamicEffects[name] = { expires: this.sim.now + duration, compute }; }
+    setDynamicEffect(name, duration, compute) { if (!name.startsWith('Susceptibility:')) this.sim.logEffect('Enemy', name, { end: this.sim.now + duration, icon: E.iconForModifiers(compute(this.sim.now)) }); this.dynamicEffects[name] = { expires: this.sim.now + duration, compute }; }
     tags(time) { // enemy-state tags usable by damage bonuses
       const tags = [];
       if (time < this.slowedUntil) tags.push('Slowed');
@@ -107,6 +107,11 @@
       this.infliction = null;
       this.sim.emit('InflictionConsumed', { source, element: current.element, stacks: current.stacks });
       return current.stacks;
+    }
+
+    hasEffect(name, time = this.sim.now) { // a named enemy effect (e.g. 'Focus') is active
+      const fixed = this.effects[name], dynamic = this.dynamicEffects[name];
+      return Boolean((fixed && fixed.expires > time) || (dynamic && dynamic.expires > time));
     }
 
     // ---- Slow, Weakness, Originium Crystals ----

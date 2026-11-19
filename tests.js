@@ -550,6 +550,41 @@ Endfield.testsDone = (async function () {
   check('consumable: each buff is its own effect (ATK and Critical Rate)', same(r.effectTimeline.filter((e) => e.name.startsWith('Ginseng Meat Stew: ')).map((e) => e.name.split(': ')[1]).join(), 'ATK,Critical Rate'), 1);
   check('builder: no manual Tactical button any more', B.ACTIONS.some(([action]) => action === 'Tactical') ? 0 : 1, 1);
 
+  // Engine additions requested for operator definitions
+  r = crew([me('ZhuangFangyi')]);
+  r.run([script(0, function* (a) { a.hit({ element: 'Electric', category: 'BattleSkill', flatDamage: 1000 }); })]);
+  check('flat damage does not scale with ATK (1000 x DEF 0.5)', r.damageLog[0].damage, 500, 1e-9);
+  const catcherLike = { ...O.Estella, derived: { DEF: (sheet) => sheet.attribute('WIL') * 0.12 } };
+  const derivedSheet = E.buildStatSheet({ operator: catcherLike, potential: 0 });
+  check('derived DEF follows live WIL (0.12 per WIL)', derivedSheet.defense() / (derivedSheet.attribute('WIL') * 0.12), 1, 1e-9);
+  r = crew([me('ZhuangFangyi'), me('Perlica')]);
+  r.run([script(1, function* (a) { a.simulation.giveEffect(E.dsl.give('controlled', 'ToController', [E.dsl.atk(0.1)], 10), { owner: a.operator, now: a.now, event: {} }); })]);
+  check('effect target "controlled" reaches only the controlled operator', ((x) => { x.operators.forEach((o) => { o.sheet.currentTime = 1; }); return x.operators[0].sheet.sum('ATKBonus') * 10 + x.operators[1].sheet.sum('ATKBonus'); })(r), 1, 1e-9);
+  r = crew([me('ZhuangFangyi', { gearPieces: set3('Eternal Xiranite') }), me('Perlica')]);
+  r.run([script(0, function* (a) { a.applyProtection(a.simulation.operators[1], 0.5, 5); a.grantShield(a.simulation.operators[1], 100, 5); })]);
+  check('Protected + Shield on a teammate; ProtectionApplied triggers Eternal Xiranite (+16% DMG)', ((x) => { const p = x.operators[1]; p.sheet.currentTime = 1; return p.sheet.sum('Protection') * 1000 + p.sheet.sum('DamageBonus') * 100 + (p.effects.Shield.state.amount === 100 ? 1 : 0) + (x.eventLog.some((e) => e.type === 'ShieldApplied') ? 0.5 : 0); })(r), 500 + 16 + 1.5, 1e-9);
+  r = crew([me('ZhuangFangyi'), me('Perlica')]);
+  r.run([script(0, function* (a) { const target = a.simulation.operators[1]; a.applyProtection(target, 0.5, 5); a.removeEffect(target, 'Protected'); })]);
+  check('removeEffect ends an effect early', ((x) => { x.operators[1].sheet.currentTime = 1; return x.operators[1].sheet.sum('Protection'); })(r), 0, 1e-9);
+  r = crew([me('ZhuangFangyi')], { ...d.enemies.TestDummy, hp: 100 });
+  r.run([script(0, function* (a) { a.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 1 }); a.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 1 }); })]);
+  check('EnemyDefeated fires once, when the damage reaches the HP', r.eventLog.filter((e) => e.type === 'EnemyDefeated').length, 1);
+  r = crew([me('ZhuangFangyi')]);
+  r.run([script(0, function* (a) { const started = a.now; a.applyDynamicEnemyEffect('Focus', 60, (time) => [{ stat: 'Susceptibility', value: 0.1 + (time - started >= 20 ? 0.04 : 0), tags: ['Heat'] }], ['Heat']); }, { lock: 61 })]);
+  check('named enemy effect: hasEffect, and a value that grows after 20s (Antal P5 pattern)', (r.enemy.status.hasEffect('Focus', 30) ? 100 : 0) + (r.enemy.status.hasEffect('Focus', 61) ? 10 : 0) + r.enemy.status.modifiers(5)[0].value * 10 + r.enemy.status.modifiers(25)[0].value * 100, 100 + 1 + 14, 1e-9);
+  let watched = 0;
+  const watcher = { ...O.Estella, name: 'Watcher', triggers: [{ on: 'DamageDealt', by: 'any', cooldown: 30, cooldownKey: ({ event }) => event.source.operator.name, apply: () => { watched++; } }] };
+  r = new E.Simulation({ team: [{ operator: watcher, potential: 0, gearPieces: [] }, { operator: O.Perlica, potential: 0, gearPieces: [] }], enemy: d.enemies.TestDummy, setBonuses: {}, criticalMode: 'never' });
+  r.run([script(0, function* (a) { a.hit({ element: 'Cryo', category: 'BattleSkill', multiplier: 1 }); a.hit({ element: 'Cryo', category: 'BattleSkill', multiplier: 1 }); }), script(1, function* (a) { a.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 1 }); a.hit({ element: 'Electric', category: 'BattleSkill', multiplier: 1 }); })]);
+  check('trigger cooldownKey: one cooldown per operator (2 operators x 2 hits = 2 triggers)', watched, 2);
+  O.TestWaiter = { name: 'TestWaiter', class: 'Guard', element: 'Nature', weaponType: 'Polearm', mainAttribute: 'STR', secondaryAttribute: 'WIL', baseStats: { HP: 5000, ATK: 300, STR: 100, AGL: 100, INT: 100, WIL: 100 }, ultimateEnergyCost: 100,
+    kit: { basicAttackElement: 'Physical', basicAttackSequence: E.opkit.batk([0.5, 0.5], 10), battleSkill: { *run(a) { yield a.wait(3); a.applyInfliction('Nature', 1); } } } };
+  state = B.defaultState(); state.team[0] = B.newSlot('TestWaiter', '', []);
+  state.actions = [{ slot: 0, action: 'BattleSkill', extraDelay: 0 }, { slot: 0, action: 'BasicAttack', extraDelay: 3.5 }];
+  view = B.simulate(state);
+  check('display: an effect applied 3s after the cast is NOT shown on the cast row, only from the row where it exists', (view.rows[0].effects[5].some((e) => e.name === 'Nature Infliction') ? 10 : 0) + (view.rows[1].effects[5].some((e) => e.name === 'Nature Infliction') ? 1 : 0), 1);
+  delete O.TestWaiter;
+
   // Calibration against the game (reported, not pass/fail): Fangyi P0, BS with 0 blades, weapon Electric 25.6%.
   const calibrationSheet = E.buildStatSheet({ operator: d.operators.ZhuangFangyi, potential: 0, weapon: currentWeapon,
     gearPieces: [d.gear.byName('Xiranflow Light Armor'), d.gear.byName('Xiranflow Gloves'), d.gear.byName('Xiranflow Baton'), d.gear.byName('LYNX Slab')], setBonuses: d.gear.setBonuses });

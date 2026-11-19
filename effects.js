@@ -58,6 +58,8 @@
     const previousSuppress = this.suppressOperatorLog;
     if (teamScoped) this.suppressOperatorLog = true;
     switch (spec.to) {
+      case 'controlled': applyTo(this.controlled); break;
+      case 'nonControlled': this.operators.filter((operator) => operator !== this.controlled).forEach((operator) => applyTo(operator)); break;
       case 'classes': this.operators.filter((operator) => spec.classes.includes(operator.definition.class)).forEach((operator) => applyTo(operator)); break;
       case 'enemy': this.enemy.status.setEffect(spec.name, modifiers, spec.duration, now); break;
       case 'team': this.operators.forEach((operator) => applyTo(operator)); break;

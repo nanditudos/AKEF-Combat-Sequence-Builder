@@ -16,6 +16,7 @@
   Endfield.icons['Vocalist Stance'] = 'icons/Liino_VocalistStance.webp';
   Endfield.icons['Starry Boost of 1st Magnitude'] = 'icons/Liino_StarryBoost.webp';
   Endfield.icons['Cosmovoice Stance'] = 'icons/Liino_CosmovoiceStance.webp';
+  Endfield.icons['Focus'] = 'icons/Antal_Focus.webp';
 
   E.roman = (n) => { // stack counts and levels are shown as Roman numerals, like in game
     let rest = Math.max(0, Math.round(n)), out = '';
@@ -42,7 +43,7 @@
       if (elements.length === 1) return 'Generic_' + elements[0];
       if (!elements.length && tags.includes('Arts')) return 'Generic_Physical'; // Aether is an unused artefact icon; Arts-only effects fall back to Generic_Physical
     }
-    //if (stats.has('CriticalRate') || stats.has('CriticalDamage')) return 'Critical';
+    //if (stats.has('CriticalRate') || stats.has('CriticalDamage')) return 'Critical_Bonus';
     if (stats.has('StaggerEfficiency')) return 'Generic_Stagger';
     if (modifiers.length && [...stats].every((stat) => DEFENSIVE.has(stat))) return 'Generic_Defense';
     return 'Generic_Attack';

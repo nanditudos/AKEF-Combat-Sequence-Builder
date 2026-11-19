@@ -35,7 +35,7 @@
   }
 
   class EnemyState {
-    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; this.damageTaken = 0; this.chargeUntil = -Infinity; }
+    constructor(data) { this.data = data; this.stagger = 0; this.staggeredUntil = -Infinity; this.finisherUsed = false; this.damageTaken = 0; this.chargeUntil = -Infinity; this.defeated = false; }
     hpFraction() { return Math.max(0, 1 - this.damageTaken / this.data.hp); } // from the damage dealt so far
     finisherPending(time) { return this.isStaggered(time) && !this.finisherUsed; } // one Finisher per Staggered window
     isStaggered(time) { return time < this.staggeredUntil; }
@@ -100,8 +100,8 @@
     }
     stackCount(name, now) { return (this.stacks[name] || []).filter((stack) => stack.expires > now).length; }
     // Same-named effect: replaced and refreshed. `state` carries values such as stack amounts.
-    setEffect(name, modifiers, duration, now, state) {
-      if (this.simulation && !this.simulation.suppressOperatorLog) this.simulation.logEffect(this.name, name, { end: now + duration, icon: E.iconForModifiers(modifiers) });
+    setEffect(name, modifiers, duration, now, state, icon) {
+      if (this.simulation && !this.simulation.suppressOperatorLog) this.simulation.logEffect(this.name, name, { end: now + duration, icon: icon || E.iconForModifiers(modifiers) });
       this.sheet.removeModifiersFrom('effect:' + name);
       this.sheet.addModifiers(modifiers.map((m) => ({ ...m, expires: now + duration })), 'effect:' + name);
       this.effects[name] = { state, expires: now + duration };
@@ -138,6 +138,29 @@
     applyEffect(name, modifiers, duration, state) { // operator effect; announces Amp gains
       this.operator.setEffect(name, modifiers, duration, this.now, state);
       if (modifiers.some((m) => m.stat === 'Amp')) this.simulation.emit('AmpGained', { source: this, element: (modifiers.find((m) => m.stat === 'Amp').tags || [])[0] });
+    }
+    controlledOperator() { return this.simulation.controlled; }
+    applyEffectTo(target, name, modifiers, duration, state, icon) { // an effect on ANY operator (e.g. the controlled one); announces Amp gains
+      target.setEffect(name, modifiers, duration, this.now, state, icon);
+      const amp = modifiers.find((m) => m.stat === 'Amp');
+      if (amp) this.simulation.emit('AmpGained', { source: this, operator: target, element: (amp.tags || [])[0] });
+    }
+    removeEffect(target, name) { target.sheet.removeModifiersFrom('effect:' + name); delete target.effects[name]; this.simulation.endEffectsNamed(target.name, name); }
+    applyProtection(target, value, duration) { // 'Protected' on an operator; fires ProtectionApplied (Eternal Xiranite)
+      this.applyEffectTo(target, 'Protected', [E.mod('Protection', value)], duration, { value }, 'Protection');
+      this.simulation.emit('ProtectionApplied', { source: this, target });
+    }
+    grantShield(target, amount, duration) { // shields are not absorbed (no HP model); the effect and the ShieldApplied event exist for triggers
+      this.applyEffectTo(target, 'Shield', [], duration, { amount }, 'Generic_Defense');
+      this.simulation.emit('ShieldApplied', { source: this, target, amount });
+    }
+    applyEnemyEffect(name, modifiers, duration, announce = []) { // announce: susceptibility elements to fire SusceptibilityApplied for
+      this.enemy.status.setEffect(name, modifiers, duration, this.now);
+      for (const element of announce) this.simulation.emit('SusceptibilityApplied', { source: this, element });
+    }
+    applyDynamicEnemyEffect(name, duration, compute, announce = []) { // compute(time) -> modifiers, re-evaluated at every hit
+      this.enemy.status.setDynamicEffect(name, duration, compute);
+      for (const element of announce) this.simulation.emit('SusceptibilityApplied', { source: this, element });
     }
     applySusceptibility(element, value, duration) { // element: 'Physical' | 'Arts' | 'Heat' ...
       this.enemy.status.setEffect('Susceptibility:' + element, [{ stat: 'Susceptibility', value, tags: [element] }], duration, this.now);
@@ -210,10 +233,12 @@
           if (trigger.on !== type) continue;
           if ((trigger.by || 'self') === 'self' && (!event.source || event.source.operator !== owner)) continue;
           const time = this.now + this.virtualOffset; // hits spread over a cast keep their own time for cooldowns
-          if (time - trigger.lastFired < (trigger.cooldown || 0)) continue;
           const context = { event, owner, simulation: this, now: this.now };
+          const key = trigger.cooldownKey ? trigger.cooldownKey(context) : ''; // optional: a separate cooldown per key (e.g. per operator)
+          trigger.firedAt = trigger.firedAt || {};
+          if (time - (trigger.firedAt[key] === undefined ? -Infinity : trigger.firedAt[key]) < (trigger.cooldown || 0)) continue;
           if (trigger.when && !trigger.when(context)) continue;
-          trigger.lastFired = time;
+          trigger.firedAt[key] = time;
           if (trigger.give) this.giveEffect(trigger.give, context);
           if (trigger.apply) trigger.apply(context);
         }
@@ -231,6 +256,7 @@
         if (instance.category === 'BattleSkill' || instance.category === 'ComboSkill') advance('skill', 'skill');
       }
       this.enemy.damageTaken += result.damage;
+      if (!this.enemy.defeated && this.enemy.damageTaken >= this.enemy.data.hp) { this.enemy.defeated = true; this.emit('EnemyDefeated', { source }); } // the enemy would die now
       if (['BattleSkill', 'ComboSkill', 'Ultimate'].includes(instance.category) && this.enemy.chargeUntil > this.now + this.virtualOffset) { // a skill hit interrupts the enemy's charge
         this.enemy.chargeUntil = -Infinity; this.endEffect(this.enemy.chargeRecord);
         if (source.dealStagger) source.dealStagger(CHARGE_INTERRUPT_STAGGER); else this.enemy.addStagger(CHARGE_INTERRUPT_STAGGER, this.now);

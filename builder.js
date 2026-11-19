@@ -95,7 +95,8 @@
         for (const effect of sim.effectTimeline) {
           const column = effect.target === 'Team' ? 4 : effect.target === 'Enemy' ? 5 : nameToColumn.get(effect.target);
           if (column === undefined) continue;
-          if (effect.entry !== simIndex && !(effect.start <= start + 1e-9 && effect.order <= after)) continue;
+          if (effect.start > start + 1e-9) continue; // not applied yet at this row's time (e.g. an effect applied 3s after the cast)
+          if (effect.entry !== simIndex && effect.order > after) continue;
           const alive = effect.end > start + 1e-9 || (Math.abs(effect.end - start) <= 1e-9 && effect.endOrder > after);
           if (!alive && effect.endEntry !== simIndex) continue;
           const list = row.effects[column];
