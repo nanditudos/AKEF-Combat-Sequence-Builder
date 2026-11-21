@@ -162,7 +162,13 @@ Add checks to `tests.js` (search for "Estella" to see the pattern). The helpers 
 - **Named enemy effects** (Focus): create with `ability.applyEnemyEffect(name, modifiers, duration, ['Heat'])` or the value-over-time form `ability.applyDynamicEnemyEffect(name, duration, (time) => [...modifiers], ['Heat'])` (the last argument lists the susceptibility elements to announce). Check with `simulation.enemy.status.hasEffect('Focus', now)` in `when`. Antal P5 pattern: `const started = ability.now; ... (time) => [{ stat: 'Susceptibility', value: 0.1 + (ability.potential >= 5 && time - started >= 20 ? 0.04 : 0), tags: ['Heat'] }, ...]`.
 - **Which effect opened the combo** (Antal): put a `capture` on each window trigger, read it in the combo:
   `windowTriggers: [{ on: 'InflictionBatch', when: focused, capture: ({ event }) => ({ element: event.element }) }, { on: 'PhysicalStatusApplied', when: focused, capture: ({ event }) => ({ kind: event.kind }) }]` and in `run`: `const c = ability.operator.comboCapture;`.
-- **Per-operator cooldowns** in triggers: add `cooldownKey: ({ event }) => event.source.operator.name` next to `cooldown`. Antal's healing talent: `{ on: 'DamageDealt', by: 'any', cooldown: 30, cooldownKey: ({ event }) => event.source.operator.name, when: ({ event, now }) => { const o = event.source.operator; o.sheet.currentTime = now; return o.sheet.sum('Amp') > 0; }, apply: ({ event }) => event.source.operator ... simulation.contextFor(owner, 'BattleSkill').grantTreatment([event.source.operator]) }`.
+- **Per-operator cooldowns** in triggers: add `cooldownKey: ({ event }) => event.source.operator.name` next to `cooldown`. Antal's healing talent (an Amped teammate deals damage, 30s per teammate):
+  ```js
+  { on: 'DamageDealt', by: 'any', cooldown: 30,
+    cooldownKey: ({ event }) => event.source.operator.name,
+    when: ({ event, now }) => { const dealer = event.source.operator; dealer.sheet.currentTime = now; return dealer.sheet.sum('Amp') > 0; },
+    apply: ({ event, owner, simulation }) => simulation.contextFor(owner, 'BattleSkill').grantTreatment([event.source.operator]) }
+  ```
 - **Combo cooldown reductions** (Fluorite P5): cooldowns are not simulated, so nothing has to be written (leave a comment).
 
 ## 11. Timing: what happens when

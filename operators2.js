@@ -49,7 +49,7 @@
   operators.Catcher = {
     stars: 4, ultimateEnergyCost: 80, name: 'Catcher', class: 'Defender', element: 'Physical', weaponType: 'Great Sword', mainAttribute: 'STR', secondaryAttribute: 'WIL', verified: false,
     baseStats: { HP: 5495, ATK: 300, STR: 176, AGL: 96, INT: 86, WIL: 106 },
-    passives: [{ name: 'Talent: STR +60', modifiers: [mod('STR', 60)] }, P(4, mod('UltimateEnergyCost', -0.1)), P(2, mod('DEF', 20), mod('WIL', 10))], //gain 0.12 DEF per WIL
+    passives: [{ name: 'Talent: STR +60', modifiers: [mod('STR', 60)] }, P(4, mod('UltimateEnergyCost', -0.1)), P(2, mod('DEF', 20), mod('WIL', 10))],
     triggers: [
 		{ on: 'OperatorAttacked', apply: ({ owner }) => { owner.flags.hitWhileShield = true; } },
 		{ on: 'DamageDealt', when: ({ event, owner }) => owner.flags.choiceWithoutRegret , apply: ({ owner }) => { owner.flags.choiceWithoutRegret = false; owner.returnSkillPoints(10)} },
@@ -98,7 +98,7 @@
         },
       },
       ultimate: { *run(ability) {
-        ability.spendUltimateEnergy(70);
+        ability.spendUltimateEnergy(80);
         ability.applyWeakness(8);//30%
         ability.lockFor(2);
 		ability.dealStagger(20);
@@ -257,4 +257,116 @@
       } },
     },
   };
+  
+  // =============================== Chen Qianyu (5 star Guard) ===============================
+  operators.Chen = {
+    stars: 5, ultimateEnergyCost: 70, name: 'Chen Qianyu', class: 'Guard', element: 'Physical', weaponType: 'Sword', mainAttribute: 'AGL', secondaryAttribute: 'STR', verified: false,
+    baseStats: { HP: 5495, ATK: 297, STR: 106, AGL: 171, INT: 85, WIL: 93 },
+    passives: [{ name: 'Talent: AGL +60', modifiers: [mod('AGL', 60)] }, P(4, mod('UltimateEnergyCost', -0.15)), P(2, mod('AGL', 15), mod('DamageBonus', 0.08, ['Physical'])), P(1, mod('DamageBonus', 0.08, ['BelowHalfHP']))],
+    triggers: [
+	  { on: 'DamageDealt', when: ({ event }) => ['BattleSkill', 'ComboSkill', 'Ultimate'].includes(event.category), give: give('self', 'Slashing Edge', [atk(0.08)], 10, { maxStacks: 5 }) },
+	  { on: 'InterruptingEnemyCharge', apply: ({ event }) => {event.source.dealStagger(10)}}//Trigger for this
+    ],
+    kit: {
+      basicAttackElement: 'Physical',
+      basicAttackSequence: batk([0.45, 0.54, 0.60, 0.68, 0.9], 16),
+      battleSkill: { *run(ability) {
+		ability.lockFor(0.5);
+        ability.spendSkillPoints(100);
+		ability.dealStagger(10);
+		ability.applyPhysicalStatus('Lift', { forced: false, liftDuration: 2.5 });
+		hit(ability, 'Physical', 'BattleSkill', 3.8 * ( ability.potential >= 3 ? 1.1 : 1) );
+      } },
+      comboSkill: {
+        cooldown: 15 /*12 when P5*/, windowTriggers: [{ on: 'VulnerableApplied'}],
+        *run(ability) {
+          ability.lockFor(0.5);
+		  ability.applyPhysicalStatus('Lift', { forced: false});
+		  hit(ability, 'Physical', 'ComboSkill', 2.7 * ( ability.potential >= 3 ? 1.1 : 1) );
+		  ability.gainUltimateEnergy(10);
+        },
+      },
+      ultimate: { *run(ability) {
+        ability.spendUltimateEnergy(70);
+		ability.lockFor(1);
+		ability.dealStagger(15);
+		for (let i=0; i<6; i++) hit(ability, 'Physical', 'Ultimate', 0.81 * ( ability.potential >= 3 ? 1.1 : 1) );
+		ability.dealStagger(20);
+        hit(ability, 'Physical', 'Ultimate', 10.23 * ( ability.potential >= 3 ? 1.1 : 1) );
+      } },
+    },
+  };
+  
+  // =============================== Snowshine (5 star Defender) ===============================
+  operators.Snowshine = {
+    stars: 5, ultimateEnergyCost: 80, name: 'Snowshine', class: 'Defender', element: 'Cryo', weaponType: 'Great Sword', mainAttribute: 'STR', secondaryAttribute: 'WIL', verified: false,
+    baseStats: { HP: 5495, ATK: 297, STR: 154, AGL: 104, INT: 93, WIL: 108 },
+    passives: [{ name: 'Talent: STR +60', modifiers:[ mod('STR', 60) ] }, P(4, mod('DEF', 20), mod('WIL', 20))], //+25% Treatment Effect for targets at or below 55% HP
+    triggers: [
+		{ on: 'OperatorAttacked', apply: ({ owner }) => { owner.flags.hitWhileShield = true; } },
+	],
+	kit: {
+      basicAttackElement: 'Physical',
+      basicAttackSequence: batk([1.24, 1.32, 2.25], 23),
+      battleSkill: { *run(ability) {
+        const operator = ability.operator;
+        ability.spendSkillPoints(100);
+		ability.applyProtection(ability.controlledOperator(), 0.9, 1.5);//if P1 arts infliction cannot be applied on the operator
+		ability.applyProtection(ability.operator, 0.9, 1.5);
+		ability.lockFor(1.5);
+		operator.flags.hitWhileShield = false;
+		ability.returnSkillPoints(30);
+		ability.background(function* () {
+			yield ability.wait(1.5);
+			ability.applyProtection(ability.controlledOperator(), 0.9, 0.5);
+			ability.applyProtection(ability.operator, 0.9, 0.5);
+			if (operator.flags.hitWhileShield) {
+				ability.lockFor(1);
+				yield ability.wait(0.7);
+				hit(ability, 'Cryo', 'BattleSkill', 4.5);
+				ability.dealStagger(20);
+				ability.applyInfliction("Cryo",1);
+				ability.gainUltimateEnergy(10);
+				if (ability.potential >= 5) ability.returnSkillPoints(10);
+				yield ability.wait(0.3);
+			}
+		}())
+      } },
+      comboSkill: {
+        cooldown: 23, windowTriggers: [{ on: 'OperatorAttacked', apply: ({hpAfter, controlled}) => hpAfter <= 0.6 && controlled}],
+        *run(ability) {
+          ability.lockFor(0.5);
+		  ability.gainUltimateEnergy(10);
+		  ability.grantTreatment('controlled');//Value 216+0.5*WIL
+		  ability.background(function* () {
+			for (let i=0; i<6; i++) {
+				yield ability.wait(0.5);
+				ability.grantTreatment('controlled');//Value 54+0.125*WIL
+			}
+		  }())
+        },
+      },
+      ultimate: { *run(ability) {
+        ability.spendUltimateEnergy(80);
+		ability.lockFor(1.5);
+		ability.dealStagger(15);
+		hit(ability, 'Cryo', 'Ultimate', 4.5);
+		ability.background(function* () {
+		  for (let i=0; i<10; i++) {
+			yield ability.wait(0.5);
+			if (i==1) {//at 1 sec, test what it is actually
+				ability.applyReaction("Cryo", 1, { duration: ( ability.potential >= 3 ? 7.75 : 5.75) });
+			}
+			hit(ability, 'Cryo', 'Ultimate', 0.65);
+		  }
+		}())
+      } },
+    },
+  };
+  
+  
+  
+  
+  
+  
 })();
